@@ -131,11 +131,15 @@ function spawnPeds(state, count) {
 }
 
 function spawnPickups(state) {
+  // Every spot sits on a road centre line, never inside a block: the old
+  // spots at (1620,540), (1980,900), (1260,1620), (540,1260) and
+  // (2700,540) landed on building roofs or open grass, where a pickup
+  // can neither be seen properly nor reached.
   const spots = [
-    { x: 700, y: 700, kind: 'health' }, { x: 1620, y: 540, kind: 'ammo' },
+    { x: 700, y: 700, kind: 'health' }, { x: 1620, y: 720, kind: 'ammo' },
     { x: 2340, y: 1440, kind: 'health' }, { x: 900, y: 1800, kind: 'ammo' },
-    { x: 1980, y: 900, kind: 'cash' }, { x: 1260, y: 1620, kind: 'cash' },
-    { x: 540, y: 1260, kind: 'health' }, { x: 2700, y: 540, kind: 'ammo' },
+    { x: 1800, y: 900, kind: 'cash' }, { x: 1260, y: 1440, kind: 'cash' },
+    { x: 720, y: 1260, kind: 'health' }, { x: 2520, y: 540, kind: 'ammo' },
   ];
   for (const s of spots) state.pickups.push({ ...s, active: true, bob: state.rng.range(0, 6) });
 }
@@ -483,17 +487,26 @@ function stepTraffic(state, dt) {
       stepCourier(state, car, dt);
       continue;
     }
-    // Ease off for the car ahead on the same road.
+    // Ease off for the car ahead on the same road. The look-ahead is
+    // long enough to stop with a real bumper gap: a car is 54 long, so
+    // a follower that only brakes inside 80px ends up nose-to-tail at
+    // 34px centres — visibly overlapping the car ahead.
     let ahead = null;
+    let aheadDist = 0;
     for (const other of state.cars) {
       if (other === car || other.wrecked) continue;
       const dx = other.x - car.x;
       const dy = other.y - car.y;
       const forward = Math.cos(car.angle) * dx + Math.sin(car.angle) * dy;
       const side = Math.abs(-Math.sin(car.angle) * dx + Math.cos(car.angle) * dy);
-      if (forward > 0 && forward < 80 && side < 30) ahead = other;
+      if (forward > 0 && forward < 120 && side < 30 && (!ahead || forward < aheadDist)) {
+        ahead = other;
+        aheadDist = forward;
+      }
     }
-    const target = ahead ? Math.min(CAR.trafficSpeed, Math.max(0, ahead.speed)) : CAR.trafficSpeed;
+    const target = !ahead ? CAR.trafficSpeed
+      : aheadDist < 75 ? 0
+      : Math.min(CAR.trafficSpeed, Math.max(0, ahead.speed));
     car.speed += clamp(target - car.speed, -260 * dt, 180 * dt);
     car.x += Math.cos(car.angle) * car.speed * dt;
     car.y += Math.sin(car.angle) * car.speed * dt;

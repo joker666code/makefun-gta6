@@ -8,7 +8,7 @@ import { CAR, STEP } from './config.js';
 import { angleDiff, clamp } from './random.js';
 import { makeCar, resetRun } from './entities.js';
 import { SCREEN_PLAY, SCREEN_TITLE } from './render.js';
-import { PLACES, buildingHit, nearestRoadPoint, planRoute } from './world.js';
+import { PLACES, buildingHit, isRoad, nearestRoadPoint, planRoute } from './world.js';
 
 const SAMPLE = STEP;
 
@@ -69,8 +69,11 @@ function driveCtl(state, tx, ty, stuck, route) {
   return { mx: steer, my: throttle, run: false, enter: false, melee: false, firing: false };
 }
 
-/** Step the world for `seconds`, steering the player along the road route. */
-function simulate(state, step, seconds, tx, ty) {
+/** Step the world for `seconds`, steering the player along the road route.
+ * `stopWhen`, if given, ends the leg early the moment it returns true —
+ * the return-to-road leg uses it to stop the instant the car is back on
+ * asphalt instead of overshooting and oscillating around the target. */
+function simulate(state, step, seconds, tx, ty, stopWhen) {
   const stuck = { time: 0, escape: 0, episode: 0 };
   // planRoute lives in world.js and is also what the police use to chase:
   // one route, planned once, so the car never re-snaps at an intersection.
@@ -78,6 +81,7 @@ function simulate(state, step, seconds, tx, ty) {
   for (let t = 0; t < seconds; t += SAMPLE) {
     const ctl = driveCtl(state, tx, ty, stuck, route);
     step(state, ctl, SAMPLE);
+    if (stopWhen && stopWhen(state)) break;
     const wp = route.points[route.index];
     if (wp && Math.hypot(state.player.x - wp.x, state.player.y - wp.y) < 100 && route.index < route.points.length - 1) {
       route.index += 1;
@@ -101,6 +105,17 @@ function simulate(state, step, seconds, tx, ty) {
   }
 }
 
+/** Drive the player car back onto the nearest road so the closing frame
+ * shows it on asphalt, not parked on the marina lot or the plaza tiles
+ * where the marker sits. The job is already complete by then, so the
+ * money and JOB counter the frame shows do not change. */
+function returnToRoad(state, step) {
+  if (!state.player.car) return;
+  const spot = nearestRoadPoint(state.city, state.player.x, state.player.y);
+  simulate(state, step, 5, spot.x, spot.y,
+    () => state.player.car && isRoad(state.city, state.player.x, state.player.y));
+}
+
 /**
  * Set the world to the named scene (start, play, chase or mission; any
  * other name is start) and return the screen to draw over it.
@@ -112,6 +127,7 @@ export function stageShot(name, state, step) {
     putPlayerInCar(state);
     const target = state.mission && state.mission.target ? state.mission.target : PLACES.marina;
     simulate(state, step, 24, target.x, target.y);
+    returnToRoad(state, step);
     return { screen: SCREEN_PLAY, best: 0 };
   }
   if (name === 'chase') {
@@ -141,6 +157,7 @@ export function stageShot(name, state, step) {
     state.player.y = PLACES.docks.y + 40;
     putPlayerInCar(state);
     simulate(state, step, 15, PLACES.plaza.x, PLACES.plaza.y);
+    returnToRoad(state, step);
     return { screen: SCREEN_PLAY, best: 0 };
   }
   // start: morning on Harbour Row, on foot beside a parked car. The camera

@@ -9,7 +9,7 @@
 
 import { CAR, CAR_MODELS, CITY, FONT, FONT_DISPLAY, JOB_COUNT, PALETTE, PED, PLAYER, VIEW, WORLD } from './config.js';
 import { angleDiff, clamp } from './random.js';
-import { PLACES } from './world.js';
+import { PLACES, buildingHit, isRoad } from './world.js';
 import { missionObjective, missionProgress } from './missions.js';
 
 export const SCREEN_TITLE = 'title';
@@ -38,12 +38,22 @@ function hash(n) {
   return ((x >>> 0) % 1000) / 1000;
 }
 
-/** Lighten (amt > 0) or darken (amt < 0) a #rrggbb colour. */
+/** Lighten (amt > 0) or darken (amt < 0) a #rrggbb or rgb(r,g,b) colour. */
 function shade(hex, amt) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.max(0, Math.min(255, (n >> 16) + amt));
-  const g = Math.max(0, Math.min(255, ((n >> 8) & 255) + amt));
-  const b = Math.max(0, Math.min(255, (n & 255) + amt));
+  let r;
+  let g;
+  let b;
+  if (hex[0] === '#') {
+    const n = parseInt(hex.slice(1), 16);
+    r = n >> 16;
+    g = (n >> 8) & 255;
+    b = n & 255;
+  } else {
+    [r, g, b] = hex.slice(4, -1).split(',').map((v) => Number(v));
+  }
+  r = Math.max(0, Math.min(255, r + amt));
+  g = Math.max(0, Math.min(255, g + amt));
+  b = Math.max(0, Math.min(255, b + amt));
   return `rgb(${r},${g},${b})`;
 }
 
@@ -419,16 +429,24 @@ export function createRenderer(canvas) {
       context.fillRect(b.x + sh, b.y + 8, b.w, b.h);
       context.fillStyle = b.color;
       context.fillRect(b.x, b.y, b.w, b.h);
-      // Parapet: darker rim, lighter inner roof, sunlit top edge.
+      // Parapet: darker rim, then the roof in the building's own hue —
+      // three material tones (tar, gravel, pale membrane) so no two
+      // neighbouring roofs read as the same brown slab.
       context.fillStyle = shade(b.color, -34);
       context.fillRect(b.x, b.y, b.w, 6);
       context.fillRect(b.x, b.y, 6, b.h);
-      context.fillStyle = PALETTE.roof;
+      const roofTone = hash(b.seed * 11 + 3);
+      const roof = roofTone < 0.4 ? shade(b.color, -58)
+        : roofTone < 0.75 ? shade(b.color, -34)
+        : shade(b.color, -14);
+      const roofHi = shade(roof, 16);
+      const roofLo = shade(roof, -16);
+      context.fillStyle = roof;
       context.fillRect(b.x + 10, b.y + 10, b.w - 20, b.h - 20);
-      context.fillStyle = PALETTE.roofLight;
+      context.fillStyle = roofHi;
       context.fillRect(b.x + 10, b.y + 10, b.w - 20, 4);
       context.fillRect(b.x + 10, b.y + 10, 4, b.h - 20);
-      context.fillStyle = PALETTE.roofDark;
+      context.fillStyle = roofLo;
       context.fillRect(b.x + 10, b.y + b.h - 14, b.w - 20, 4);
       context.fillRect(b.x + b.w - 14, b.y + 10, 4, b.h - 20);
       // Roof furniture, deterministic per building.
@@ -495,25 +513,87 @@ export function createRenderer(canvas) {
       context.arc(lamp.x, lamp.y, 3.5, 0, Math.PI * 2);
       context.fill();
     }
-    // Trees: ground shadow, layered canopy, sunlit top.
+    // Trees: ground shadow, a trunk, and a three-lobe canopy in a
+    // per-tree green so no two trees are the same flat lollipop.
     for (const t of city.trees) {
       if (t.x < vx0 - 30 || t.x > vx1 + 30 || t.y < vy0 - 30 || t.y > vy1 + 30) continue;
+      const hue = hash(t.x * 0.31 + t.y * 0.17);
+      const base = hue < 0.4 ? '#3f7a34' : hue < 0.75 ? '#4a8540' : '#35702e';
+      const mid = hue < 0.4 ? '#5da24a' : hue < 0.75 ? '#6cb258' : '#549a44';
+      const hi = hue < 0.4 ? '#7cc46a' : hue < 0.75 ? '#8fd47e' : '#74b964';
+      const off = t.r * 0.34;
+      const wob = hash(t.x * 0.07 + t.y * 0.11) * Math.PI * 2;
+      const lx = Math.cos(wob) * off;
+      const ly = Math.sin(wob) * off * 0.7;
       context.fillStyle = 'rgba(0,0,0,0.22)';
       context.beginPath();
       context.ellipse(t.x + 4, t.y + 5, t.r, t.r * 0.8, 0, 0, Math.PI * 2);
       context.fill();
-      context.fillStyle = '#3f7a34';
+      context.fillStyle = '#4a3524';
       context.beginPath();
-      context.arc(t.x, t.y, t.r, 0, Math.PI * 2);
+      context.arc(t.x + 2, t.y + t.r * 0.55, 3, 0, Math.PI * 2);
       context.fill();
-      context.fillStyle = '#5da24a';
+      context.fillStyle = base;
       context.beginPath();
-      context.arc(t.x - 3, t.y - 3, t.r * 0.7, 0, Math.PI * 2);
+      context.arc(t.x - lx, t.y - ly, t.r * 0.72, 0, Math.PI * 2);
       context.fill();
-      context.fillStyle = '#7cc46a';
       context.beginPath();
-      context.arc(t.x - 5, t.y - 6, t.r * 0.35, 0, Math.PI * 2);
+      context.arc(t.x + lx, t.y + ly * 0.6, t.r * 0.72, 0, Math.PI * 2);
       context.fill();
+      context.beginPath();
+      context.arc(t.x, t.y, t.r * 0.78, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = mid;
+      context.beginPath();
+      context.arc(t.x - 3, t.y - 3, t.r * 0.55, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.arc(t.x + lx * 0.5, t.y - ly * 0.5, t.r * 0.4, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = hi;
+      context.beginPath();
+      context.arc(t.x - 5, t.y - 6, t.r * 0.3, 0, Math.PI * 2);
+      context.fill();
+    }
+
+    // Ground cover on the open lawns: deterministic bushes and wildflower
+    // dots, so the big grass blocks are not flat green. Skips roads,
+    // buildings, the park, the plaza, the docks and the beach.
+    for (let gx = Math.floor(vx0 / 120) * 120; gx < vx1; gx += 120) {
+      for (let gy = Math.floor(vy0 / 120) * 120; gy < vy1; gy += 120) {
+        const h1 = hash(gx * 0.53 + gy * 0.29);
+        if (h1 >= 0.09) continue;
+        const bx = gx + 20 + hash(gx * 1.7 + gy) * 80;
+        const by = gy + 20 + hash(gx + gy * 1.3) * 80;
+        if (bx < CITY.beachWidth || isRoad(city, bx, by) || buildingHit(city, bx, by, 10)) continue;
+        if (bx > city.park.x - 10 && bx < city.park.x + city.park.w + 10 && by > city.park.y - 10 && by < city.park.y + city.park.h + 10) continue;
+        if (bx > 1462 && bx < 1778 && by > 742 && by < 1058) continue;
+        if (bx > 282 && bx < 666 && ((by > 382 && by < 698) || (by > 1822 && by < 2138))) continue;
+        if (h1 < 0.05) {
+          context.fillStyle = 'rgba(0,0,0,0.18)';
+          context.beginPath();
+          context.ellipse(bx + 2, by + 3, 10, 7, 0, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = '#4c7a3a';
+          context.beginPath();
+          context.arc(bx - 3, by, 7, 0, Math.PI * 2);
+          context.fill();
+          context.beginPath();
+          context.arc(bx + 4, by - 2, 6, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = '#6aa84f';
+          context.beginPath();
+          context.arc(bx - 1, by - 3, 4, 0, Math.PI * 2);
+          context.fill();
+        } else {
+          context.fillStyle = hash(bx + by) < 0.5 ? '#e8e4d8' : '#e07a9b';
+          for (let f = 0; f < 3; f += 1) {
+            context.beginPath();
+            context.arc(bx + hash(bx * 3 + f) * 16 - 8, by + hash(by * 5 + f) * 12 - 6, 1.8, 0, Math.PI * 2);
+            context.fill();
+          }
+        }
+      }
     }
 
     // Pickups: glow ring, bobbing icon, soft shadow.
@@ -647,7 +727,10 @@ export function createRenderer(canvas) {
       context.arc(lamp.x, lamp.y, 130, 0, Math.PI * 2);
       context.fill();
     }
-    // Headlight cones: the player's car and every cruiser throws light.
+    // Headlight cones: three nested triangles per car — a wide faint
+    // wash, a mid layer, a narrow bright core — so the beam has soft
+    // edges instead of one hard-edged triangle, plus a hot spot at the
+    // lamps. In the rain the beam also throws a wet sheen on the road.
     for (const car of state.cars) {
       if (car.wrecked) continue;
       const isPlayerCar = state.player.car === car;
@@ -658,19 +741,46 @@ export function createRenderer(canvas) {
       const fx = car.x + Math.cos(a) * 26;
       const fy = car.y + Math.sin(a) * 26;
       const len = isPlayerCar ? 190 : 130;
-      const spread = 0.42;
-      const grad = context.createLinearGradient(fx, fy, fx + Math.cos(a) * len, fy + Math.sin(a) * len);
-      grad.addColorStop(0, `rgba(255,243,196,${(0.34 * nf).toFixed(2)})`);
-      grad.addColorStop(1, 'rgba(255,243,196,0)');
-      context.fillStyle = grad;
+      const layers = [
+        [0.46, 0.13],
+        [0.32, 0.20],
+        [0.19, 0.30],
+      ];
+      for (const [spread, alpha] of layers) {
+        const grad = context.createLinearGradient(fx, fy, fx + Math.cos(a) * len, fy + Math.sin(a) * len);
+        grad.addColorStop(0, `rgba(255,243,196,${(alpha * nf).toFixed(2)})`);
+        grad.addColorStop(1, 'rgba(255,243,196,0)');
+        context.fillStyle = grad;
+        context.beginPath();
+        context.moveTo(fx, fy);
+        context.lineTo(fx + Math.cos(a - spread) * len, fy + Math.sin(a - spread) * len);
+        context.lineTo(fx + Math.cos(a + spread) * len, fy + Math.sin(a + spread) * len);
+        context.closePath();
+        context.fill();
+      }
+      const hot = context.createRadialGradient(fx, fy, 1, fx, fy, 26);
+      hot.addColorStop(0, `rgba(255,246,210,${(0.5 * nf).toFixed(2)})`);
+      hot.addColorStop(1, 'rgba(255,246,210,0)');
+      context.fillStyle = hot;
       context.beginPath();
-      context.moveTo(fx, fy);
-      const left = a - spread;
-      const right = a + spread;
-      context.lineTo(fx + Math.cos(left) * len, fy + Math.sin(left) * len);
-      context.lineTo(fx + Math.cos(right) * len, fy + Math.sin(right) * len);
-      context.closePath();
+      context.arc(fx, fy, 26, 0, Math.PI * 2);
       context.fill();
+      if (state.rain > 0) {
+        // Wet sheen stretched along the beam on the road ahead.
+        const sx = car.x + Math.cos(a) * 95;
+        const sy = car.y + Math.sin(a) * 95;
+        context.save();
+        context.translate(sx, sy);
+        context.rotate(a);
+        const sheen = context.createRadialGradient(0, 0, 4, 0, 0, 95);
+        sheen.addColorStop(0, `rgba(255,243,196,${(0.10 * nf).toFixed(2)})`);
+        sheen.addColorStop(1, 'rgba(255,243,196,0)');
+        context.fillStyle = sheen;
+        context.beginPath();
+        context.ellipse(0, 0, 95, 24, 0, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      }
     }
     // Police light bars wash red and blue onto the road around cruisers.
     for (const car of state.cars) {
@@ -695,15 +805,15 @@ export function createRenderer(canvas) {
 
   /** Diagonal rain streaks, deterministic per frame. */
   function drawRain(state, vx0, vy0) {
-    const drops = Math.round(state.rain * 90);
-    context.strokeStyle = 'rgba(200,220,255,0.28)';
+    const drops = Math.round(state.rain * 110);
+    context.strokeStyle = 'rgba(200,220,255,0.36)';
     context.lineWidth = 1;
     context.beginPath();
     for (let i = 0; i < drops; i += 1) {
       const x = vx0 + ((hash(i * 31) * VIEW.width + state.time * 130) % VIEW.width);
       const y = vy0 + ((hash(i * 57) * VIEW.height + state.time * 720) % VIEW.height);
       context.moveTo(x, y);
-      context.lineTo(x - 5, y + 13);
+      context.lineTo(x - 6, y + 18);
     }
     context.stroke();
   }
@@ -713,6 +823,14 @@ export function createRenderer(canvas) {
     if (!mission || !mission.target) return;
     const t = mission.target;
     const pulse = 1 + Math.sin(state.time * 4) * 0.12;
+    // Where a label may sit on screen: inside the frame, clear of the
+    // top panels, and clear of the speed chip at bottom-left.
+    const labelSpot = (sx, sy) => {
+      let lx = clamp(sx, 90, VIEW.width - 90);
+      let ly = clamp(sy, 26, VIEW.height - 26);
+      if (state.player.car && lx < 210 && ly > VIEW.height - 118) ly = VIEW.height - 118;
+      return { x: vx0 + lx, y: vy0 + ly };
+    };
     const inView = t.x > vx0 && t.x < vx0 + VIEW.width && t.y > vy0 && t.y < vy0 + VIEW.height;
     if (inView) {
       context.save();
@@ -728,7 +846,13 @@ export function createRenderer(canvas) {
       context.beginPath();
       context.arc(t.x, t.y, 34 + Math.sin(state.time * 4) * 6, 0, Math.PI * 2);
       context.stroke();
-      textOutlined(t.label, t.x, t.y - 48, 17, '#ffffff', 'center', true);
+      // The label is clamped to the screen, so a marker near the edge
+      // (the marina on the title screen, a van at the frame edge) never
+      // runs off the frame; it drops below the marker near the top.
+      let ly = t.y - 48 - vy0;
+      if (ly < 116) ly = 122;
+      const spot = labelSpot(t.x - vx0, ly);
+      textOutlined(t.label, spot.x, spot.y, 17, '#ffffff', 'center', true);
     } else {
       // Edge arrow pointing at an off-screen objective.
       const cx = clamp(t.x, vx0 + 60, vx0 + VIEW.width - 60);
@@ -745,9 +869,10 @@ export function createRenderer(canvas) {
       context.closePath();
       context.fill();
       context.restore();
-      // The label stays on screen even when the arrow sits at the edge.
-      const labelX = clamp(cx, 120, VIEW.width - 120);
-      textOutlined(`${t.label} ${Math.round(Math.hypot(t.x - state.player.x, t.y - state.player.y))}m`, labelX, cy - 20, 14, '#ffffff', 'center', true);
+      // The label stays on screen even when the arrow sits at the edge,
+      // and never lands on the speed chip or the bottom hint line.
+      const spot = labelSpot(cx - vx0, cy - vy0 - 20);
+      textOutlined(`${t.label} ${Math.round(Math.hypot(t.x - state.player.x, t.y - state.player.y))}m`, spot.x, spot.y, 14, '#ffffff', 'center', true);
     }
   }
 
@@ -1095,22 +1220,24 @@ export function createRenderer(canvas) {
       }
     }
 
-    // Bottom-left: speed in its own dark chip, the car's health bar under it.
+    // Bottom-left: speed in its own dark chip, the car's health bar under
+    // it. The chip sits 22px higher than the hint line so the SHIFT / P /
+    // M key chips at the very bottom never overlap it.
     if (player.car) {
       const kmh = Math.round(Math.abs(player.car.speed) * 0.36);
       context.fillStyle = 'rgba(10,14,20,0.78)';
-      rr(14, VIEW.height - 78, 122, 64, 10);
+      rr(14, VIEW.height - 100, 122, 64, 10);
       context.fill();
       context.fillStyle = PALETTE.gold;
-      context.fillRect(24, VIEW.height - 78, 102, 3);
-      text(`${kmh}`, 28, VIEW.height - 40, 34, PALETTE.text, 'left', true, true);
-      text('km/h', 96, VIEW.height - 40, 15, PALETTE.muted, 'left');
+      context.fillRect(24, VIEW.height - 100, 102, 3);
+      text(`${kmh}`, 28, VIEW.height - 62, 34, PALETTE.text, 'left', true, true);
+      text('km/h', 96, VIEW.height - 62, 15, PALETTE.muted, 'left');
       const carHealth = Math.max(0, player.car.health) / 100;
       context.fillStyle = '#2c313a';
-      rr(28, VIEW.height - 30, 94, 6, 3);
+      rr(28, VIEW.height - 52, 94, 6, 3);
       context.fill();
       context.fillStyle = carHealth > 0.4 ? PALETTE.green : PALETTE.red;
-      rr(28, VIEW.height - 30, 94 * carHealth, 6, 3);
+      rr(28, VIEW.height - 52, 94 * carHealth, 6, 3);
       context.fill();
     }
     // Bottom hint line: key chips, then the plain text.
@@ -1168,6 +1295,11 @@ export function createRenderer(canvas) {
     context.lineWidth = 1;
     rr(MINIMAP.x - 4, MINIMAP.y - 4, MINIMAP.w + 8, MINIMAP.h + 8, 8);
     context.stroke();
+    // The title sits over the live world, so it gets its own dark pill —
+    // without one the crosswalk stripes behind it cut through the letters.
+    context.fillStyle = 'rgba(10,14,20,0.82)';
+    rr(MINIMAP.x + MINIMAP.w / 2 - 62, MINIMAP.y - 20, 124, 18, 9);
+    context.fill();
     text('PORT SOLMAR', MINIMAP.x + MINIMAP.w / 2, MINIMAP.y - 8, 10, PALETTE.muted, 'center', true, true, 2);
     context.save();
     context.beginPath();
