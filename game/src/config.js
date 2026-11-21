@@ -1,0 +1,141 @@
+// Solmar Heat — every tuning number and colour in one place.
+// The world is one big top-down city (2880 x 2160) and the camera follows
+// the player; the renderer scales a 1280x720 view to the window, so no rule
+// below depends on the screen size.
+
+export const VIEW = { width: 1280, height: 720 };
+export const WORLD = { width: 2880, height: 2160 };
+
+/** The simulation's fixed step, in seconds: 60 updates a second. */
+export const STEP = 1 / 60;
+
+/** City layout: roads run every BLOCK apart, leaving blocks of buildings. */
+export const CITY = {
+  block: 360,
+  roadWidth: 64,
+  sidewalk: 12,
+  beachWidth: 260,
+  parkAt: { x: 1112, y: 752, w: 296, h: 296 },
+};
+
+export const PLAYER = {
+  radius: 13,
+  walkSpeed: 210,
+  runSpeed: 300,
+  health: 100,
+  startMoney: 120,
+  startAmmo: 24,
+  enterRange: 70,
+};
+
+export const CAR = {
+  length: 54,
+  width: 26,
+  radius: 20,
+  accel: 420,
+  brake: 700,
+  reverse: 180,
+  maxSpeed: 560,
+  maxReverse: 160,
+  turnRate: 2.6,
+  drag: 0.55,
+  trafficSpeed: 150,
+  policeSpeed: 520,
+};
+
+export const PED = { radius: 10, walkSpeed: 55, fleeSpeed: 170 };
+
+export const COMBAT = {
+  bulletSpeed: 950,
+  bulletLife: 0.7,
+  fireDelay: 0.22,
+  copFireDelay: 0.9,
+  copDamage: 7,
+  playerDamage: 34,
+  carRamDamage: 18,
+  meleeRange: 34,
+  meleeDamage: 20,
+};
+
+export const WANTED = {
+  max: 5,
+  steal: 1,
+  hitPed: 1,
+  shoot: 1,
+  decayQuiet: 22,
+  decayStep: 9,
+};
+
+/** Five linked jobs, in story order. Rewards are paid in dollars. */
+export const MISSIONS = [
+  {
+    id: 'first-wheels',
+    title: 'First Wheels',
+    giver: 'Mara Voss',
+    briefing: 'You are new in Port Solmar and broke. Borrow a car — any car — and bring it to the marina marker.',
+    objective: 'Steal a car and drive to the marina marker',
+    reward: 250,
+  },
+  {
+    id: 'package-run',
+    title: 'Package Run',
+    giver: 'Mara Voss',
+    briefing: 'A parcel is waiting at the docks. Pick it up on foot, then drive it to Solmar Plaza before the buyer walks.',
+    objective: 'Collect the package at the docks, deliver it to Solmar Plaza',
+    reward: 400,
+  },
+  {
+    id: 'tail-the-courier',
+    title: 'Tail the Courier',
+    giver: 'Dario Kent',
+    briefing: 'A courier van is carrying rival cash across town. Stay close behind it until it stops — do not lose it.',
+    objective: 'Tail the courier van until it stops',
+    reward: 600,
+  },
+  {
+    id: 'heat-escape',
+    title: 'Heat Escape',
+    giver: 'Mara Voss',
+    briefing: 'The Solmar police are on you now. Lose the heat, then reach the hideout in the old town.',
+    objective: 'Lose the police, then reach the hideout',
+    reward: 800,
+  },
+  {
+    id: 'the-big-score',
+    title: 'The Big Score',
+    giver: 'Dario Kent',
+    briefing: 'One last job: the Solmar Trust vault. Grab the cash on foot and run it to the hideout. Every cop in town will come.',
+    objective: 'Grab the vault cash and escape to the hideout',
+    reward: 1500,
+  },
+];
+
+export const PALETTE = {
+  grass: '#7fae5a',
+  grassDark: '#74a24f',
+  sand: '#e8d29a',
+  water: '#2f7fb8',
+  waterDeep: '#256a9e',
+  road: '#3a3f46',
+  roadLine: '#e8d44d',
+  sidewalk: '#9aa0a8',
+  park: '#5d9c4a',
+  building: ['#c98f5f', '#b57a6a', '#8fa3b8', '#a8a58e', '#c2a15a', '#7d8ba0', '#b08d7e'],
+  roof: '#5c5148',
+  panel: '#14181fd9',
+  panelSolid: '#14181f',
+  text: '#f2f4f0',
+  muted: '#b9c0c8',
+  gold: '#f2c94c',
+  red: '#e5534b',
+  blue: '#4fc3f7',
+  green: '#7ed957',
+  copBlue: '#2f6df6',
+  copWhite: '#f4f6f8',
+};
+
+export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+
+/** Where a saved game is kept between visits (this browser only). */
+export const SAVE_KEY = 'solmar-heat.save.v1';
+export const BEST_KEY = 'solmar-heat.best.v1';
