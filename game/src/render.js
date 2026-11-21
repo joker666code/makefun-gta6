@@ -4,7 +4,7 @@
 // shapes and canvas text throughout — the art direction is a sun-soaked
 // coastal city: warm sand, green parks, grey roads and colourful roofs.
 
-import { CAR, CITY, FONT, PALETTE, PED, PLAYER, VIEW, WORLD } from './config.js';
+import { CAR, CITY, FONT, JOB_COUNT, PALETTE, PED, PLAYER, VIEW, WORLD } from './config.js';
 import { clamp } from './random.js';
 import { PLACES } from './world.js';
 import { missionObjective, missionProgress } from './missions.js';
@@ -16,6 +16,15 @@ export const SCREEN_OVER = 'over';
 
 const MINIMAP = { x: VIEW.width - 250, y: 14, w: 236, h: 176 };
 
+// The three boats anchored in the bay (x, y, hull colour).
+const BOATS = [[70, 480, '#f4f6f8'], [100, 1420, '#e8b73d'], [55, 980, '#d94f3d']];
+// The named places dotted on the minimap (place, colour).
+const PLACE_DOTS = [
+  [PLACES.marina, '#4fc3f7'], [PLACES.plaza, '#f2c94c'], [PLACES.docks, '#ffffff'],
+  [PLACES.hideout, '#7ed957'], [PLACES.vault, '#e5534b'],
+];
+
+/** A cheap deterministic hash in [0, 1) for window placement on roofs. */
 function hash(n) {
   let x = (n * 2654435761) | 0;
   x ^= x >>> 13;
@@ -50,6 +59,7 @@ export function createRenderer(canvas) {
     context.fillText(value, x, y);
   }
 
+  /** Rounded-rect path (call fill or stroke after). */
   function rr(x, y, w, h, r) {
     context.beginPath();
     context.moveTo(x + r, y);
@@ -66,6 +76,7 @@ export function createRenderer(canvas) {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
+  /** Warm daylight tint by time of day: dawn/dusk gold, night deep blue. */
   function dayTint(clock) {
     const h = clock / 3600;
     if (h >= 6 && h < 9) return { color: '#ff9a3d', alpha: 0.10 };
@@ -82,15 +93,14 @@ export function createRenderer(canvas) {
     const vx1 = vx0 + VIEW.width;
     const vy1 = vy0 + VIEW.height;
 
-    // Grass base.
+    // Grass base, with mown stripes for a little texture.
     context.fillStyle = PALETTE.grass;
     context.fillRect(vx0, vy0, VIEW.width, VIEW.height);
-    // Mown stripes for a little texture.
     context.fillStyle = PALETTE.grassDark;
     for (let y = Math.floor(vy0 / 120) * 120; y < vy1; y += 240) {
       context.fillRect(vx0, y, VIEW.width, 120);
     }
-    // Sea and beach on the west edge.
+    // Sea and beach on the west edge, waves and boats included.
     if (vx0 < CITY.beachWidth) {
       context.fillStyle = PALETTE.waterDeep;
       context.fillRect(vx0, vy0, Math.min(CITY.beachWidth - 130, vx1) - vx0, VIEW.height);
@@ -104,8 +114,7 @@ export function createRenderer(canvas) {
         context.quadraticCurveTo(70, y + 8, 120, y + Math.sin(state.time * 1.4 + y * 0.05) * 6);
         context.stroke();
       }
-      // Boats bobbing in the bay.
-      for (const [bx, by, bc] of [[70, 480, '#f4f6f8'], [100, 1420, '#e8b73d'], [55, 980, '#d94f3d']]) {
+      for (const [bx, by, bc] of BOATS) {
         const bob = Math.sin(state.time * 1.1 + by * 0.01) * 4;
         context.fillStyle = bc;
         context.beginPath();
@@ -429,15 +438,15 @@ export function createRenderer(canvas) {
     text(`Ammo ${player.ammo}`, 28, 96, 16, PALETTE.text, 'left');
     text(player.car ? 'DRIVING' : 'ON FOOT', 170, 96, 16, PALETTE.blue, 'left', true);
 
-    // Top-centre: current mission, with job number and a progress bar.
+    // Top-centre: current job, with its number and a progress bar.
     const mission = state.mission;
     if (mission) {
-      const label = `JOB ${mission.index + 1}/7  •  ${mission.def.title}  •  $${mission.def.reward}`;
+      const label = `JOB ${mission.index + 1}/${JOB_COUNT}  •  ${mission.def.title}  •  $${mission.def.reward}`;
       const obj = missionObjective(state);
       const prog = missionProgress(state);
       const h = prog ? 80 : 62;
-      context.fillStyle = 'rgba(10,14,20,0.72)';
       const w = 480;
+      context.fillStyle = 'rgba(10,14,20,0.72)';
       rr(VIEW.width / 2 - w / 2, 12, w, h, 10);
       context.fill();
       text(label, VIEW.width / 2, 38, 18, PALETTE.gold, 'center', true);
@@ -474,8 +483,7 @@ export function createRenderer(canvas) {
       context.fill();
     }
 
-    // Bottom-left: speed in its own dark chip, above the hint line,
-    // with the car's health bar underneath the speed.
+    // Bottom-left: speed in its own dark chip, the car's health bar under it.
     if (player.car) {
       const kmh = Math.round(Math.abs(player.car.speed) * 0.36);
       context.fillStyle = 'rgba(10,14,20,0.72)';
@@ -534,11 +542,7 @@ export function createRenderer(canvas) {
     const px = (x) => MINIMAP.x + x * sx;
     const py = (y) => MINIMAP.y + y * sy;
     // Key places, colour-coded, so the map reads without the mission marker.
-    const placeDots = [
-      [PLACES.marina, '#4fc3f7'], [PLACES.plaza, '#f2c94c'], [PLACES.docks, '#ffffff'],
-      [PLACES.hideout, '#7ed957'], [PLACES.vault, '#e5534b'],
-    ];
-    for (const [place, color] of placeDots) {
+    for (const [place, color] of PLACE_DOTS) {
       context.fillStyle = color;
       context.fillRect(px(place.x) - 2, py(place.y) - 2, 4, 4);
     }

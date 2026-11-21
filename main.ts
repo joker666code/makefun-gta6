@@ -20,6 +20,11 @@ import { buildDossier } from './vendor/makefun-game.ts';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
+// Fail loudly, before copying anything, if the game entry point is missing.
+if (!existsSync(join(here, 'game', 'index.html'))) {
+  throw new Error('game/index.html is missing — nothing to hand in');
+}
+
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });

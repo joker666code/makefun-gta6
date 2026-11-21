@@ -74,6 +74,7 @@ function simulate(state, step, seconds, tx, ty) {
     const wp = route.points[route.index];
     if (wp && Math.hypot(state.player.x - wp.x, state.player.y - wp.y) < 70 && route.index < route.points.length - 1) {
       route.index += 1;
+      stuck.time = 0; // reaching a waypoint proves the car is not stuck
     }
     if (state.player.car && Math.abs(state.player.car.speed) < 25) stuck.time += SAMPLE;
     else stuck.time = 0;

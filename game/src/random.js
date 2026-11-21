@@ -14,7 +14,21 @@ export function createRandom(seed) {
   next.int = (min, max) => Math.floor(next.range(min, max + 1));
   next.pick = (list) => list[Math.floor(next() * list.length)];
   next.chance = (p) => next() < p;
+  /** Shuffle a copy of the list, in place on the copy, and return it. */
+  next.shuffle = (list) => {
+    const out = list.slice();
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(next() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
   return next;
+}
+
+/** Linear interpolation between two numbers. */
+export function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
 /** Clamp a value into a range. */

@@ -1,9 +1,10 @@
-// The simulation: the player on foot and in cars, traffic, pedestrians,
-// police, the wanted level and combat. No drawing here and no browser in
-// it — stepGame() advances one fixed step and returns what happened as bit
-// flags, so the caller can play sounds and show messages without this
-// file knowing about screens or audio. Missions live in missions.js and
-// are updated from here.
+// The simulation: the player on foot and behind the wheel, traffic,
+// pedestrians, the police and the wanted level, combat, pickups and
+// particles. Nothing here draws anything and nothing here touches the
+// browser — stepGame() moves the world one fixed tick and reports what
+// happened as bit flags, so the caller can play sounds and show messages
+// without this file knowing about screens or audio. The job chain itself
+// lives in missions.js and is ticked from here.
 
 import { CAR, CITY, COMBAT, MISSIONS, PED, PLAYER, WANTED, WORLD } from './config.js';
 import { angleDiff, clamp, dist } from './random.js';
@@ -25,7 +26,7 @@ const PED_COLORS = ['#e8a87c', '#8ecae6', '#ffb703', '#90be6d', '#f28482', '#b08
 
 let nextCarId = 1;
 
-/** Make a car. `driver` is traffic, park, police, courier or none. */
+/** Build a car. `driver` is traffic, park, police, courier or none. */
 export function makeCar(x, y, angle, color, kind, driver, axis) {
   return {
     id: nextCarId,
@@ -40,7 +41,7 @@ export function makeCar(x, y, angle, color, kind, driver, axis) {
   };
 }
 
-/** A fresh game state: the player, traffic, pedestrians and pickups. */
+/** A fresh run: player, traffic, pedestrians, pickups, first job open. */
 export function createState(random, city) {
   nextCarId = 1;
   const state = {
@@ -79,7 +80,7 @@ export function createState(random, city) {
   spawnParked(state, 8);
   spawnPeds(state, 22);
   spawnPickups(state);
-  updateMissions(state, city, 0); // starts job 1 and fills state.mission
+  updateMissions(state, city, 0); // opens job 1 and fills state.mission
   return state;
 }
 
@@ -136,6 +137,7 @@ export function addWanted(state, amount) {
   return state.wanted > before ? EVENT_CRIME : 0;
 }
 
+/** A short-lived spray of particles, for smoke, sparks and blood. */
 function burst(state, x, y, color, count, speed) {
   for (let i = 0; i < count; i += 1) {
     const a = state.rng.range(0, Math.PI * 2);
@@ -193,10 +195,9 @@ function exitCar(state) {
 
 function spawnPoliceCar(state) {
   const p = randomRoadPoint(state.city, state.rng);
-  // Put the cruiser on a road 500-700 away from the player.
   const dx = state.player.x - p.x;
   const dy = state.player.y - p.y;
-  if (Math.hypot(dx, dy) < 420) return;
+  if (Math.hypot(dx, dy) < 420) return; // too close to appear out of nowhere
   const car = makeCar(p.x, p.y, Math.atan2(dy, dx), '#f4f6f8', 'cop', 'police', p.axis);
   car.speed = CAR.policeSpeed * 0.7;
   state.cars.push(car);
@@ -215,7 +216,7 @@ function updatePolice(state, dt) {
   if (state.wanted >= 2 && !state.player.car && state.cops.length < Math.min(2, state.wanted - 1) && state.rng.chance(dt * 0.5)) {
     spawnFootCop(state);
   }
-  // Wanted decays only while the player is quiet and no police are close.
+  // The heat only cools while the player is quiet and no police are near.
   const nearPolice = policeCars.some((c) => dist(c.x, c.y, state.player.x, state.player.y) < 520)
     || state.cops.some((c) => dist(c.x, c.y, state.player.x, state.player.y) < 420);
   if (state.wanted > 0 && !nearPolice) {
@@ -265,7 +266,8 @@ function stepPlayerOnFoot(state, ctl, dt) {
     player.ammo -= 1;
     state.stats.shotsFired += 1;
     const a = player.angle + state.rng.range(-0.03, 0.03);
-    burst(state, player.x + Math.cos(a) * 24, player.y + Math.sin(a) * 24, '#ffe66d', 3, 60); // muzzle flash
+    // Muzzle flash: a few bright sparks at the end of the barrel.
+    burst(state, player.x + Math.cos(a) * 24, player.y + Math.sin(a) * 24, '#ffe66d', 3, 60);
     state.bullets.push({
       x: player.x + Math.cos(a) * 20, y: player.y + Math.sin(a) * 20,
       vx: Math.cos(a) * COMBAT.bulletSpeed, vy: Math.sin(a) * COMBAT.bulletSpeed,
@@ -296,9 +298,10 @@ function stepPlayerOnFoot(state, ctl, dt) {
   return 0;
 }
 
-/** Move a car, sliding along a building face when the full move is
- * blocked instead of stopping dead in the corner. Returns true if the
- * car moved at all. */
+/**
+ * Move a car, sliding along a building face when the full move is
+ * blocked instead of stopping dead in the corner. True if it moved at all.
+ */
 function moveCarWithSlide(state, car, dt) {
   const nx = car.x + Math.cos(car.angle) * car.speed * dt;
   const ny = car.y + Math.sin(car.angle) * car.speed * dt;
@@ -323,7 +326,7 @@ function stepDriving(state, ctl, dt) {
   const car = player.car;
   if (!car) return 0;
   let events = 0;
-  // W/S or Up/Down: throttle and brake. A/D: steering (reversed when reversing).
+  // W/S or Up/Down: throttle and brake. A/D: steering (reversed in reverse).
   const throttle = ctl.my < 0 ? 1 : ctl.my > 0 ? -0.6 : 0;
   const steer = ctl.mx;
   if (throttle > 0) car.speed += CAR.accel * throttle * dt;
@@ -331,9 +334,11 @@ function stepDriving(state, ctl, dt) {
   else car.speed -= Math.sign(car.speed) * CAR.drag * Math.abs(car.speed) * dt * 2;
   if (Math.abs(car.speed) < 8 && throttle === 0) car.speed = 0;
   car.speed = clamp(car.speed, -CAR.maxReverse, CAR.maxSpeed);
-  // Handbrake (Shift): sharper steering, speed bleeds off, tyres smoke.
+  // Handbrake (Shift): at speed it is a drift — steering bites 1.7x,
+  // speed scrubs off, the rear tyres smoke. At a crawl it is a hard stop.
   const drifting = ctl.run && Math.abs(car.speed) > 120;
-  const turn = steer * CAR.turnRate * dt * (car.speed >= 0 ? 1 : -1) * clamp(Math.abs(car.speed) / 120, 0.3, 1) * (drifting ? CAR.driftTurn : 1);
+  const grip = clamp(Math.abs(car.speed) / 120, 0.3, 1);
+  const turn = steer * CAR.turnRate * dt * (car.speed >= 0 ? 1 : -1) * grip * (drifting ? CAR.driftTurn : 1);
   if (drifting) {
     car.speed -= Math.sign(car.speed) * CAR.driftDrag * dt;
     if (state.rng.chance(dt * 22)) {
@@ -342,7 +347,7 @@ function stepDriving(state, ctl, dt) {
       state.particles.push({ x: bx, y: by, vx: state.rng.range(-20, 20), vy: state.rng.range(-20, 20), life: 0.5, max: 0.5, color: '#cfcfcf', size: state.rng.range(4, 7) });
     }
   } else if (ctl.run && Math.abs(car.speed) > 0) {
-    car.speed -= Math.sign(car.speed) * CAR.driftDrag * 2 * dt; // handbrake at low speed: hard stop
+    car.speed -= Math.sign(car.speed) * CAR.driftDrag * 2 * dt;
   }
   car.angle += turn;
   if (!moveCarWithSlide(state, car, dt)) {
@@ -370,8 +375,8 @@ function stepDriving(state, ctl, dt) {
       events |= addWanted(state, WANTED.hitPed);
     }
   }
-  // Ramming a police cruiser damages it; ramming traffic slows both cars
-  // and shoves the other car aside, so a jam can always be pushed through.
+  // Ramming a cruiser damages it; ramming traffic slows both cars and
+  // shoves the other one aside, so a jam can always be pushed through.
   for (const other of state.cars) {
     if (other === car || other.wrecked) continue;
     const d = dist(car.x, car.y, other.x, other.y);
@@ -415,7 +420,7 @@ function stepTraffic(state, dt) {
       stepCourier(state, car, dt);
       continue;
     }
-    // Slow down for the car ahead on the same road.
+    // Ease off for the car ahead on the same road.
     let ahead = null;
     for (const other of state.cars) {
       if (other === car || other.wrecked) continue;
@@ -506,7 +511,7 @@ function stepPeds(state, dt) {
       }
       continue;
     }
-    // 'wait' is the taxi passenger: they stand at the plaza until picked up.
+    // 'wait' is the taxi fare: they stand on the plaza until picked up.
     if (ped.mode === 'wait') continue;
     const danger = state.bullets.some((b) => b.from === 'player' && dist(b.x, b.y, ped.x, ped.y) < 90)
       || (player.car && dist(player.x, player.y, ped.x, ped.y) < 130 && Math.abs(player.speed) > 150)
@@ -739,6 +744,7 @@ export function stepGame(state, ctl, dt) {
     state.day += 1;
   }
   if (state.messageTimer > 0) state.messageTimer -= dt;
+  // Crash shake fades out steadily (1.8 per second) until it reaches zero.
   if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 1.8);
   if (state.over) return events;
 
@@ -763,7 +769,7 @@ export function stepGame(state, ctl, dt) {
     state.pickupEvent = false;
   }
 
-  // Missions advance here: they read the world and pay out on completion.
+  // Jobs advance here: they read the world and pay out on completion.
   const missionEvents = updateMissions(state, state.city, dt);
   events |= missionEvents;
   if (missionEvents & EVENT_MISSION) {

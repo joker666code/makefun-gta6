@@ -173,12 +173,16 @@ function runGame() {
   }
 
   function handleTitleKeys(event) {
-    if (screen !== SCREEN_TITLE) return;
-    if (event.code === 'KeyC' && hasSave()) {
-      if (loadGame()) startGame(false);
-    } else if (event.code === 'KeyR') {
-      startGame(true);
+    if (screen === SCREEN_TITLE) {
+      if (event.code === 'KeyC' && hasSave()) {
+        if (loadGame()) startGame(false);
+      } else if (event.code === 'KeyR') {
+        startGame(true);
+      }
+      return;
     }
+    // R also restarts straight from the game-over screen.
+    if (screen === SCREEN_OVER && event.code === 'KeyR') startGame(true);
   }
   window.addEventListener('keydown', handleTitleKeys);
 

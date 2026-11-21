@@ -180,6 +180,20 @@ export function planRoute(city, fromX, fromY, toX, toY) {
   return route;
 }
 
+/** The named place nearest (x, y), with its distance — for HUD hints. */
+export function nearestPlace(x, y) {
+  let best = null;
+  let bestD = Infinity;
+  for (const place of Object.values(PLACES)) {
+    const d = Math.hypot(place.x - x, place.y - y);
+    if (d < bestD) {
+      bestD = d;
+      best = place;
+    }
+  }
+  return { place: best, distance: bestD };
+}
+
 /** Named places the missions and the shots use. */
 export const PLACES = {
   marina: { x: 330, y: 1980, label: 'Marina' },

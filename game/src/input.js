@@ -46,6 +46,7 @@ export function createInput(canvas) {
   window.addEventListener('blur', () => {
     keys.clear();
     mouse.down = false;
+    mouse.clicked = false; // a click that started before the blur never fires late
   });
   canvas.addEventListener('pointermove', (event) => {
     const rect = canvas.getBoundingClientRect();

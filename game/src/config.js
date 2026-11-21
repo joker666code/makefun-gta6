@@ -1,15 +1,17 @@
-// Solmar Heat — every tuning number and colour in one place.
-// The world is one big top-down city (2880 x 2160) and the camera follows
-// the player; the renderer scales a 1280x720 view to the window, so no rule
-// below depends on the screen size.
+// Solmar Heat — all tuning lives here and nowhere else.
+//
+// The city is 2880 x 2160, the camera chases the player, and the renderer
+// fits a 1280 x 720 view onto the window. Nothing below cares about the
+// actual window size, so the same numbers drive both the game and the
+// staged screenshot scenes.
 
 export const VIEW = { width: 1280, height: 720 };
 export const WORLD = { width: 2880, height: 2160 };
 
-/** The simulation's fixed step, in seconds: 60 updates a second. */
+/** One simulation tick, in seconds (the game runs at 60 ticks a second). */
 export const STEP = 1 / 60;
 
-/** City layout: roads run every BLOCK apart, leaving blocks of buildings. */
+/** Streets are laid out on a grid: a road every BLOCK pixels. */
 export const CITY = {
   block: 360,
   roadWidth: 64,
@@ -39,7 +41,8 @@ export const CAR = {
   maxReverse: 160,
   turnRate: 2.6,
   drag: 0.55,
-  /** Handbrake (Shift) drift: sharper steering, speed bleeds off. */
+  // Holding Shift while driving is the handbrake: steering bites harder
+  // (driftTurn), speed scrubs off faster (driftDrag), rear tyres smoke.
   driftTurn: 1.7,
   driftDrag: 140,
   trafficSpeed: 150,
@@ -69,7 +72,13 @@ export const WANTED = {
   decayStep: 9,
 };
 
-/** Seven linked jobs, in story order. Rewards are paid in dollars. */
+/** How many jobs the story chain holds (the HUD prints JOB n/<this>). */
+export const JOB_COUNT = 7;
+
+/**
+ * The seven jobs, in story order. Mara Voss hands out the odd ones,
+ * Dario Kent the even ones; the last job pays the big money and ends the game.
+ */
 export const MISSIONS = [
   {
     id: 'first-wheels',
@@ -155,6 +164,6 @@ export const PALETTE = {
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
-/** Where a saved game is kept between visits (this browser only). */
+/** localStorage keys for the save and the best haul (this browser only). */
 export const SAVE_KEY = 'solmar-heat.save.v1';
 export const BEST_KEY = 'solmar-heat.best.v1';

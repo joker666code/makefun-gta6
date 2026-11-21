@@ -13,6 +13,7 @@ export function createAudio() {
   let sirenGain = null;
   let sirenTimer = 0;
   let muted = false;
+  let volume = 0.5;
   let sirenOn = false;
 
   function ensure() {
@@ -99,8 +100,14 @@ export function createAudio() {
     },
     toggleMute() {
       muted = !muted;
-      if (master) master.gain.value = muted ? 0 : 0.5;
+      if (master) master.gain.value = muted ? 0 : volume;
       return muted;
+    },
+    /** Master volume 0..1 (default 0.5); honoured by the mute toggle. */
+    setVolume(level) {
+      volume = Math.max(0, Math.min(1, level));
+      if (master) master.gain.value = muted ? 0 : volume;
+      return volume;
     },
     isMuted() {
       return muted;
