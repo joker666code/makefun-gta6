@@ -8,7 +8,7 @@ import { CAR, STEP } from './config.js';
 import { angleDiff, clamp } from './random.js';
 import { makeCar, resetRun } from './entities.js';
 import { SCREEN_PLAY, SCREEN_TITLE } from './render.js';
-import { PLACES, nearestRoadPoint, planRoute } from './world.js';
+import { PLACES, buildingHit, nearestRoadPoint, planRoute } from './world.js';
 
 const SAMPLE = STEP;
 
@@ -18,6 +18,10 @@ function putPlayerInCar(state) {
   let bestD = Infinity;
   for (const car of state.cars) {
     if (car.wrecked || car.driver === 'police') continue;
+    // Never stage the player in a car already wedged into a building
+    // corner: its collision circle overlaps the wall and no move can
+    // free it, so the scene would open on a car that cannot drive.
+    if (buildingHit(state.city, car.x, car.y, CAR.radius)) continue;
     const d = Math.hypot(car.x - state.player.x, car.y - state.player.y);
     if (d < bestD) {
       bestD = d;
@@ -53,18 +57,21 @@ function driveCtl(state, tx, ty, stuck, route) {
   const want = Math.atan2(wp.y - car.y, wp.x - car.x);
   const diff = angleDiff(car.angle, want);
   const steer = clamp(diff * 1.8, -1, 1);
-  if (stuck.time > 1.2) {
-    return { mx: -steer, my: 1, run: false, enter: false, melee: false, firing: false };
+  if (stuck.escape > 0) {
+    // Escape: back up for a fixed stretch, alternating the steer side
+    // each episode so a repeated wedge gets a different way out.
+    const dir = (stuck.episode || 0) % 2 === 0 ? -1 : 1;
+    return { mx: dir * steer, my: 1, run: false, enter: false, melee: false, firing: false };
   }
   // Brake into a sharp turn so the car makes the corner instead of
   // overshooting into the building on the far side.
-  const throttle = Math.abs(diff) > 0.7 && Math.abs(car.speed) > 150 ? 0.5 : -1;
+  const throttle = Math.abs(diff) > 0.5 && Math.abs(car.speed) > 120 ? 0.5 : -1;
   return { mx: steer, my: throttle, run: false, enter: false, melee: false, firing: false };
 }
 
 /** Step the world for `seconds`, steering the player along the road route. */
 function simulate(state, step, seconds, tx, ty) {
-  const stuck = { time: 0 };
+  const stuck = { time: 0, escape: 0, episode: 0 };
   // planRoute lives in world.js and is also what the police use to chase:
   // one route, planned once, so the car never re-snaps at an intersection.
   const route = { points: planRoute(state.city, state.player.x, state.player.y, tx, ty), index: 0 };
@@ -72,13 +79,25 @@ function simulate(state, step, seconds, tx, ty) {
     const ctl = driveCtl(state, tx, ty, stuck, route);
     step(state, ctl, SAMPLE);
     const wp = route.points[route.index];
-    if (wp && Math.hypot(state.player.x - wp.x, state.player.y - wp.y) < 70 && route.index < route.points.length - 1) {
+    if (wp && Math.hypot(state.player.x - wp.x, state.player.y - wp.y) < 100 && route.index < route.points.length - 1) {
       route.index += 1;
       stuck.time = 0; // reaching a waypoint proves the car is not stuck
     }
+    if (stuck.escape > 0) {
+      stuck.escape -= SAMPLE;
+      if (stuck.escape <= 0) {
+        // The escape is over: re-plan from where the car ended up, so a
+        // wedge against one corner does not send it back to the same one.
+        route.points = planRoute(state.city, state.player.x, state.player.y, tx, ty);
+        route.index = 0;
+        stuck.episode += 1;
+        stuck.time = 0;
+      }
+      continue;
+    }
     if (state.player.car && Math.abs(state.player.car.speed) < 25) stuck.time += SAMPLE;
     else stuck.time = 0;
-    if (stuck.time > 2.2) stuck.time = 0;
+    if (stuck.time > 1.0) stuck.escape = 1.6;
   }
 }
 
@@ -96,7 +115,9 @@ export function stageShot(name, state, step) {
     return { screen: SCREEN_PLAY, best: 0 };
   }
   if (name === 'chase') {
-    state.clock = 18 * 3600 + 1800;
+    // Night chase in the rain: 21:00, lamps and headlights on, wet roads.
+    state.clock = 21 * 3600;
+    state.rain = 0.6;
     putPlayerInCar(state);
     state.wanted = 3;
     addPoliceCruiser(state, -320, -180);

@@ -7,7 +7,7 @@
 // lives in missions.js and is ticked from here.
 
 import { CAR, CITY, COMBAT, MISSIONS, PED, PLAYER, WANTED, WORLD } from './config.js';
-import { angleDiff, clamp, dist } from './random.js';
+import { angleDiff, clamp, createRandom, dist } from './random.js';
 import { PLACES, buildingHit, isWater, planRoute, randomRoadPoint, randomSidewalkPoint, resolveCircle } from './world.js';
 import { updateMissions } from './missions.js';
 
@@ -31,6 +31,7 @@ export function makeCar(x, y, angle, color, kind, driver, axis) {
   return {
     id: nextCarId,
     x, y, angle, speed: 0,
+    visAngle: angle, // render-side smoothed heading, so turns look fluid
     color, kind, driver,
     axis: axis || 'x',
     dir: 1,
@@ -44,8 +45,14 @@ export function makeCar(x, y, angle, color, kind, driver, axis) {
 /** A fresh run: player, traffic, pedestrians, pickups, first job open. */
 export function createState(random, city) {
   nextCarId = 1;
+  // A second RNG stream for purely visual jitter (exhaust, shells, the
+  // extra muzzle flash, explosion spray, ped trouser colours). It is
+  // seeded from the city geometry, so it never draws from the simulation
+  // stream and can never change traffic, police or mission outcomes.
+  const vrng = createRandom((((city.buildings.length * 2654435761) ^ (city.trees.length * 40503) ^ ((city.buildings[0] ? city.buildings[0].x : 0) * 97)) >>> 0) || 1);
   const state = {
     rng: random,
+    vrng,
     city,
     time: 0,
     clock: 9 * 3600,
@@ -53,13 +60,15 @@ export function createState(random, city) {
     player: {
       x: PLACES.start.x, y: PLACES.start.y, angle: -Math.PI / 2,
       health: PLAYER.health, ammo: PLAYER.startAmmo, money: PLAYER.startMoney,
-      car: null, invuln: 0, fireTimer: 0, speed: 0,
+      car: null, invuln: 0, fireTimer: 0, speed: 0, phase: 0,
     },
     cars: [],
     peds: [],
     cops: [],
     bullets: [],
     particles: [],
+    skids: [], // fading tyre marks left by drifts and hard stops
+    rain: 0, // 0 = dry, 1 = heavy rain; the chase scene turns it on
     pickups: [],
     wanted: 0,
     quietTimer: 0,
@@ -88,7 +97,7 @@ function spawnTraffic(state, count) {
   for (let i = 0; i < count; i += 1) {
     const p = randomRoadPoint(state.city, state.rng);
     const angle = p.axis === 'x' ? (state.rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2) : (state.rng.chance(0.5) ? 0 : Math.PI);
-    const car = makeCar(p.x, p.y, angle, state.rng.pick(CAR_COLORS), state.rng.pick(['sedan', 'sedan', 'taxi', 'van']), 'traffic', p.axis);
+    const car = makeCar(p.x, p.y, angle, state.rng.pick(CAR_COLORS), state.rng.pick(['sedan', 'sedan', 'taxi', 'van', 'sports']), 'traffic', p.axis);
     car.dir = state.rng.chance(0.5) ? 1 : -1;
     car.speed = CAR.trafficSpeed * state.rng.range(0.8, 1.1);
     state.cars.push(car);
@@ -102,7 +111,7 @@ function spawnParked(state, count) {
     const x = along ? p.x + (state.rng.chance(0.5) ? 1 : -1) * 44 : p.x + state.rng.range(-120, 120);
     const y = along ? p.y + state.rng.range(-120, 120) : p.y + (state.rng.chance(0.5) ? 1 : -1) * 44;
     const angle = along ? (state.rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2) : (state.rng.chance(0.5) ? 0 : Math.PI);
-    const car = makeCar(x, y, angle, state.rng.pick(CAR_COLORS), state.rng.pick(['sedan', 'sedan', 'taxi']), 'park', p.axis);
+    const car = makeCar(x, y, angle, state.rng.pick(CAR_COLORS), state.rng.pick(['sedan', 'sedan', 'taxi', 'sports']), 'park', p.axis);
     state.cars.push(car);
   }
 }
@@ -114,6 +123,8 @@ function spawnPeds(state, count) {
       x: p.x, y: p.y, angle: state.rng.range(0, Math.PI * 2),
       speed: PED.walkSpeed * state.rng.range(0.7, 1.3),
       color: state.rng.pick(PED_COLORS),
+      pants: state.vrng.pick(['#2b3a55', '#4a3b2a', '#333333', '#5a6b7a']),
+      phase: state.vrng.range(0, Math.PI * 2),
       mode: 'walk', tx: p.x, ty: p.y, wait: 0, down: 0,
     });
   }
@@ -138,12 +149,43 @@ export function addWanted(state, amount) {
 }
 
 /** A short-lived spray of particles, for smoke, sparks and blood. */
-function burst(state, x, y, color, count, speed) {
+function burst(state, x, y, color, count, speed, glow, rng) {
+  const r = rng || state.rng;
   for (let i = 0; i < count; i += 1) {
-    const a = state.rng.range(0, Math.PI * 2);
-    const s = state.rng.range(speed * 0.3, speed);
-    state.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: state.rng.range(0.3, 0.8), max: 0.8, color, size: state.rng.range(2, 5) });
+    const a = r.range(0, Math.PI * 2);
+    const s = r.range(speed * 0.3, speed);
+    state.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: r.range(0.3, 0.8), max: 0.8, color, size: r.range(2, 5), glow: Boolean(glow) });
   }
+}
+
+/** A wreck going up: orange flash, fire, smoke and flying debris. */
+function explode(state, x, y) {
+  burst(state, x, y, '#ffb03d', 10, 260, true, state.vrng);
+  burst(state, x, y, '#ff5a2d', 8, 200, true, state.vrng);
+  burst(state, x, y, '#ffdd66', 6, 160, true, state.vrng);
+  burst(state, x, y, '#555550', 14, 130, false, state.vrng);
+  burst(state, x, y, '#2b2b2b', 10, 90, false, state.vrng);
+  state.shake = Math.min(1, (state.shake || 0) + 0.7);
+}
+
+/** One spent brass case, kicked out sideways with a little spin. */
+function ejectShell(state, x, y, angle) {
+  const a = angle + Math.PI / 2 + state.vrng.range(-0.4, 0.4);
+  state.particles.push({
+    x, y, vx: Math.cos(a) * 90, vy: Math.sin(a) * 90 - 40,
+    life: 0.55, max: 0.55, color: '#d9a441', size: 2, shell: true, glow: false,
+  });
+}
+
+/** A tyre mark segment, left where a rear wheel scrubbed the road. */
+function addSkid(state, car) {
+  const bx = car.x - Math.cos(car.angle) * 20;
+  const by = car.y - Math.sin(car.angle) * 20;
+  const perp = car.angle + Math.PI / 2;
+  for (const side of [-1, 1]) {
+    state.skids.push({ x: bx + Math.cos(perp) * side * 9, y: by + Math.sin(perp) * side * 9, angle: car.angle, life: 5, max: 5 });
+  }
+  if (state.skids.length > 240) state.skids.splice(0, state.skids.length - 240);
 }
 
 function nearestCar(state, x, y, maxDist) {
@@ -257,6 +299,8 @@ function stepPlayerOnFoot(state, ctl, dt) {
   player.x = pos.x;
   player.y = pos.y;
   player.speed = mx === 0 && my === 0 ? 0 : speed;
+  // Walk cycle: the phase drives the leg swing in the renderer.
+  if (player.speed > 0) player.phase = (player.phase || 0) + dt * speed * 0.055;
   if (ctl.aimX !== undefined) player.angle = Math.atan2(ctl.aimY - player.y, ctl.aimX - player.x);
   if (player.invuln > 0) player.invuln -= dt;
   if (player.fireTimer > 0) player.fireTimer -= dt;
@@ -267,7 +311,9 @@ function stepPlayerOnFoot(state, ctl, dt) {
     state.stats.shotsFired += 1;
     const a = player.angle + state.rng.range(-0.03, 0.03);
     // Muzzle flash: a few bright sparks at the end of the barrel.
-    burst(state, player.x + Math.cos(a) * 24, player.y + Math.sin(a) * 24, '#ffe66d', 3, 60);
+    burst(state, player.x + Math.cos(a) * 24, player.y + Math.sin(a) * 24, '#ffe66d', 3, 60, true);
+    burst(state, player.x + Math.cos(a) * 26, player.y + Math.sin(a) * 26, '#ff9a3d', 2, 40, true, state.vrng);
+    ejectShell(state, player.x, player.y, a);
     state.bullets.push({
       x: player.x + Math.cos(a) * 20, y: player.y + Math.sin(a) * 20,
       vx: Math.cos(a) * COMBAT.bulletSpeed, vy: Math.sin(a) * COMBAT.bulletSpeed,
@@ -318,6 +364,16 @@ function moveCarWithSlide(state, car, dt) {
     car.y = ny;
     return true;
   }
+  // Wedged: the car already overlaps a building (shoved into a corner by
+  // traffic, or parked on a road edge). Every candidate move still
+  // overlaps, so sliding cannot free it — push it out to the nearest
+  // free spot instead of leaving it stuck there forever.
+  const pos = resolveCircle(state.city, car.x, car.y, CAR.radius);
+  if (pos.x !== car.x || pos.y !== car.y) {
+    car.x = pos.x;
+    car.y = pos.y;
+    return true;
+  }
   return false;
 }
 
@@ -341,6 +397,7 @@ function stepDriving(state, ctl, dt) {
   const turn = steer * CAR.turnRate * dt * (car.speed >= 0 ? 1 : -1) * grip * (drifting ? CAR.driftTurn : 1);
   if (drifting) {
     car.speed -= Math.sign(car.speed) * CAR.driftDrag * dt;
+    addSkid(state, car);
     if (state.rng.chance(dt * 22)) {
       const bx = car.x - Math.cos(car.angle) * 22;
       const by = car.y - Math.sin(car.angle) * 22;
@@ -348,6 +405,12 @@ function stepDriving(state, ctl, dt) {
     }
   } else if (ctl.run && Math.abs(car.speed) > 0) {
     car.speed -= Math.sign(car.speed) * CAR.driftDrag * 2 * dt;
+  }
+  // Exhaust: a faint puff from the tailpipe while the engine pulls.
+  if (throttle > 0 && Math.abs(car.speed) > 60 && state.vrng.chance(dt * 14)) {
+    const ex = car.x - Math.cos(car.angle) * (CAR.length / 2 + 2);
+    const ey = car.y - Math.sin(car.angle) * (CAR.length / 2 + 2);
+    state.particles.push({ x: ex, y: ey, vx: -Math.cos(car.angle) * 40 + state.vrng.range(-12, 12), vy: -Math.sin(car.angle) * 40 + state.vrng.range(-12, 12), life: 0.7, max: 0.7, color: 'rgba(180,180,180,0.55)', size: state.vrng.range(3, 6) });
   }
   car.angle += turn;
   if (!moveCarWithSlide(state, car, dt)) {
@@ -391,7 +454,7 @@ function stepDriving(state, ctl, dt) {
         if (other.health <= 0 && !other.wrecked) {
           other.wrecked = true;
           other.driver = 'none';
-          burst(state, other.x, other.y, '#555', 22, 200);
+          explode(state, other.x, other.y);
         }
         if (other.driver === 'police') events |= addWanted(state, 1);
       }
@@ -404,7 +467,7 @@ function stepDriving(state, ctl, dt) {
   }
   if (car.health <= 0 && !car.wrecked) {
     car.wrecked = true;
-    burst(state, car.x, car.y, '#333', 26, 220);
+    explode(state, car.x, car.y);
     exitCar(state);
     setMessage(state, 'Your car is wrecked. Find another ride.');
   }
@@ -550,15 +613,18 @@ function stepPeds(state, dt) {
     const speed = ped.mode === 'flee' ? PED.fleeSpeed : ped.speed;
     const a = Math.atan2(ped.ty - ped.y, ped.tx - ped.x);
     ped.angle = a;
+    ped.phase = (ped.phase || 0) + dt * speed * 0.075;
     const pos = resolveCircle(state.city, ped.x + Math.cos(a) * speed * dt, ped.y + Math.sin(a) * speed * dt, PED.radius);
     ped.x = pos.x;
     ped.y = pos.y;
   }
-  // Keep the streets busy: replace peds who wandered far off.
+    // Keep the streets busy: replace peds who wandered far off.
   if (state.peds.length < 18 && state.rng.chance(dt * 0.4)) {
     const p = randomSidewalkPoint(state.city, state.rng);
     state.peds.push({
       x: p.x, y: p.y, angle: 0, speed: PED.walkSpeed, color: state.rng.pick(PED_COLORS),
+      pants: state.vrng.pick(['#2b3a55', '#4a3b2a', '#333333', '#5a6b7a']),
+      phase: state.vrng.range(0, Math.PI * 2),
       mode: 'walk', tx: p.x, ty: p.y, wait: 0, down: 0,
     });
   }
@@ -625,6 +691,7 @@ function stepFootCops(state, dt) {
     const a = Math.atan2(player.y - cop.y, player.x - cop.x);
     cop.angle = a;
     if (d > 46) {
+      cop.phase = (cop.phase || 0) + dt * cop.speed * 0.075;
       const pos = resolveCircle(state.city, cop.x + Math.cos(a) * cop.speed * dt, cop.y + Math.sin(a) * cop.speed * dt, PED.radius);
       cop.x = pos.x;
       cop.y = pos.y;
@@ -636,6 +703,8 @@ function stepFootCops(state, dt) {
     if (cop.fireTimer <= 0 && d < 340 && d > 60 && !player.car) {
       cop.fireTimer = COMBAT.copFireDelay + state.rng.range(0, 0.5);
       const spread = state.rng.range(-0.14, 0.14);
+      burst(state, cop.x + Math.cos(a) * 20, cop.y + Math.sin(a) * 20, '#ffe66d', 3, 60, true, state.vrng);
+      ejectShell(state, cop.x, cop.y, a);
       state.bullets.push({
         x: cop.x + Math.cos(a) * 18, y: cop.y + Math.sin(a) * 18,
         vx: Math.cos(a + spread) * COMBAT.bulletSpeed * 0.85, vy: Math.sin(a + spread) * COMBAT.bulletSpeed * 0.85,
@@ -689,7 +758,7 @@ function stepBullets(state, dt) {
           if (car.health <= 0) {
             car.wrecked = true;
             car.driver = 'none';
-            burst(state, car.x, car.y, '#555', 20, 200);
+            explode(state, car.x, car.y);
           }
           break;
         }
@@ -731,6 +800,8 @@ function stepParticles(state, dt) {
     p.life -= dt;
   }
   state.particles = state.particles.filter((p) => p.life > 0);
+  for (const s of state.skids) s.life -= dt;
+  state.skids = state.skids.filter((s) => s.life > 0);
 }
 
 /** One fixed step of the whole game. `ctl` carries the frame's input. */

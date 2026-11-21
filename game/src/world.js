@@ -74,7 +74,25 @@ export function buildCity(random) {
   for (let y = 120; y < WORLD.height - 60; y += 130) {
     trees.push({ x: CITY.beachWidth - 26, y, r: 12 + random() * 6 });
   }
-  return { buildings, trees, park, vertical, horizontal };
+  // Street lamps on the corner of every intersection: the night lighting
+  // pass pools warm light around these, so the grid reads after dark.
+  const lamps = [];
+  for (const vx of vertical) {
+    for (const hy of horizontal) {
+      lamps.push({ x: vx + CITY.roadWidth / 2 + CITY.sidewalk + 4, y: hy - CITY.roadWidth / 2 - CITY.sidewalk - 4 });
+    }
+  }
+  // Beach umbrellas and towels on the sand, and crates stacked in the
+  // docks yard, so the waterfront is not a flat colour band.
+  const umbrellas = [];
+  for (let y = 200; y < WORLD.height - 120; y += 260) {
+    umbrellas.push({ x: CITY.beachWidth - 62, y: y + random.range(-30, 30), color: random.pick(['#e5534b', '#f2c94c', '#4fc3f7', '#7ed957']) });
+  }
+  const crates = [];
+  for (let i = 0; i < 10; i += 1) {
+    crates.push({ x: 320 + random.range(0, 280), y: 420 + random.range(0, 220), s: 22 + random.range(0, 14), color: random.pick(['#a8763e', '#8a6d3b', '#7d8ba0']) });
+  }
+  return { buildings, trees, park, vertical, horizontal, lamps, umbrellas, crates };
 }
 
 /** True when the point is in the sea (west of the beach). */

@@ -51,6 +51,22 @@ export const CAR = {
 
 export const PED = { radius: 10, walkSpeed: 55, fleeSpeed: 170 };
 
+/**
+ * Top-down body specs per vehicle kind. Collision still uses CAR.length /
+ * CAR.width, but each kind draws its own silhouette, glass, lights and trim
+ * inside that box, so a cruiser, a cab and a sports car read differently
+ * at a glance. `trim` is the accent stripe / roof colour, `glass` the
+ * window tint, `wheels` the tyre inset from the body edge.
+ */
+export const CAR_MODELS = {
+  sedan: { body: null, trim: '#22262c', glass: '#22303e', roof: null, spoiler: false, stripe: false, sign: false, wheels: 4 },
+  sports: { body: null, trim: '#1a1d22', glass: '#101c26', roof: null, spoiler: true, stripe: true, sign: false, wheels: 6 },
+  taxi: { body: '#e8b73d', trim: '#151515', glass: '#22303e', roof: '#e8b73d', spoiler: false, stripe: false, sign: true, wheels: 4 },
+  cop: { body: '#f4f6f8', trim: '#2f6df6', glass: '#1d2733', roof: '#f4f6f8', spoiler: false, stripe: true, sign: false, wheels: 4 },
+  van: { body: null, trim: '#22262c', glass: '#2b3a48', roof: null, spoiler: false, stripe: false, sign: false, wheels: 2 },
+  courier: { body: '#c9a24a', trim: '#3a2f10', glass: '#22303e', roof: '#c9a24a', spoiler: false, stripe: false, sign: false, wheels: 2 },
+};
+
 export const COMBAT = {
   bulletSpeed: 950,
   bulletLife: 0.7,
@@ -141,28 +157,43 @@ export const MISSIONS = [
 export const PALETTE = {
   grass: '#7fae5a',
   grassDark: '#74a24f',
+  grassLight: '#8abd68',
   sand: '#e8d29a',
+  sandDark: '#dcc184',
   water: '#2f7fb8',
-  waterDeep: '#256a9e',
+  waterDeep: '#1d5a8a',
+  waterShallow: '#57a8d4',
   road: '#3a3f46',
+  roadDark: '#2f3339',
   roadLine: '#e8d44d',
   sidewalk: '#9aa0a8',
+  sidewalkDark: '#878d96',
   park: '#5d9c4a',
+  parkPath: '#cbb98a',
   building: ['#c98f5f', '#b57a6a', '#8fa3b8', '#a8a58e', '#c2a15a', '#7d8ba0', '#b08d7e'],
   roof: '#5c5148',
+  roofLight: '#6e6258',
+  roofDark: '#463d36',
+  sign: ['#e5534b', '#2f6df6', '#7ed957', '#f2c94c', '#e07a9b', '#3da67a'],
   panel: '#14181fd9',
   panelSolid: '#14181f',
+  panelEdge: '#f2c94c',
   text: '#f2f4f0',
   muted: '#b9c0c8',
   gold: '#f2c94c',
+  goldDark: '#b98f1d',
   red: '#e5534b',
   blue: '#4fc3f7',
   green: '#7ed957',
   copBlue: '#2f6df6',
   copWhite: '#f4f6f8',
+  lampGlow: '#ffd98a',
+  headlight: '#fff3c4',
 };
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+/** Display face for titles and big numbers: heavy, condensed, no webfont. */
+export const FONT_DISPLAY = '"Arial Narrow", "Helvetica Neue", Arial, system-ui, sans-serif';
 
 /** localStorage keys for the save and the best haul (this browser only). */
 export const SAVE_KEY = 'solmar-heat.save.v1';
