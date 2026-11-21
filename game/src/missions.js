@@ -60,7 +60,7 @@ function openJob(state, index) {
       break;
     case 2: {
       const spot = randomRoadPoint(state.city, state.rng);
-      const van = makeCar(spot.x, spot.y, 0, '#e8e8e8', 'van', 'courier', spot.axis);
+      const van = makeCar(spot.x, spot.y, 0, '#e8e8e8', 'courier', 'courier', spot.axis);
       van.wpIndex = 0;
       state.cars.push(van);
       mission.targetCar = van;

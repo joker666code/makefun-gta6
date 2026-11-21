@@ -116,6 +116,52 @@ function returnToRoad(state, step) {
     () => state.player.car && isRoad(state.city, state.player.x, state.player.y));
 }
 
+/** True when the courier van is on the same road ahead of the player
+ * car, 200–400px out — close enough to read as the car being tailed,
+ * far enough that the tail timer (which needs <230px) barely moves —
+ * and no cruiser is glued to it, so the frame does not catch a police
+ * car stacked on top of the van. */
+function courierAhead(state) {
+  const van = state.mission && state.mission.targetCar;
+  const car = state.player.car;
+  if (!van || van.wrecked || !car) return false;
+  const dx = van.x - car.x;
+  const dy = van.y - car.y;
+  const d = Math.hypot(dx, dy);
+  if (d > 400 || d < 200) return false;
+  const ahead = Math.cos(car.angle) * dx + Math.sin(car.angle) * dy;
+  if (ahead <= 0) return false;
+  if (Math.abs(van.y - car.y) >= 40 && Math.abs(van.x - car.x) >= 40) return false;
+  for (const other of state.cars) {
+    if (other.driver === 'police' && !other.wrecked && Math.hypot(other.x - van.x, other.y - van.y) < 130) return false;
+  }
+  return true;
+}
+
+/** Frame the tailing job's closing shot: stage the player car on the
+ * van's eastbound leg (the top of its loop, y=720, facing east), then
+ * wait for the van to come round onto the same road ahead. If the van
+ * has already parked at the end of its loop, drive to a spot on its
+ * road 300px short of it instead. The job stays JOB 3/7 either way. */
+function frameCourier(state, step) {
+  const van = state.mission && state.mission.targetCar;
+  if (!van || !state.player.car) return;
+  simulate(state, step, 12, 1750, 720, () => courierAhead(state));
+  if (courierAhead(state)) return;
+  const idle = { mx: 0, my: 0, run: false, enter: false, melee: false, firing: false };
+  for (let t = 0; t < 45; t += SAMPLE) {
+    step(state, idle, SAMPLE);
+    if (courierAhead(state)) return;
+    if (!state.mission || state.mission.phase !== 'tail') return;
+  }
+  const v = state.mission && state.mission.targetCar;
+  if (v && !v.wrecked) {
+    const onH = Math.abs(v.y - 1440) < 60; // parked at the loop's end
+    simulate(state, step, 12, onH ? v.x - 300 : v.x, onH ? v.y : v.y - 300,
+      () => courierAhead(state));
+  }
+}
+
 /**
  * Set the world to the named scene (start, play, chase or mission; any
  * other name is start) and return the screen to draw over it.
@@ -158,15 +204,18 @@ export function stageShot(name, state, step) {
     putPlayerInCar(state);
     simulate(state, step, 15, PLACES.plaza.x, PLACES.plaza.y);
     returnToRoad(state, step);
+    frameCourier(state, step);
     return { screen: SCREEN_PLAY, best: 0 };
   }
   // start: morning on Harbour Row, on foot beside a parked car. The camera
-  // sits off-centre so the player shows beside the title panel, not under it.
+  // sits off-centre so the player shows beside the title panel, not under it,
+  // and the panel's narrower width leaves a car or a pedestrian visible
+  // in the margin on the far side.
   state.clock = 9 * 3600;
   for (let i = 0; i < 5 / SAMPLE; i += 1) {
     step(state, { mx: 0, my: 0, run: false, enter: false, melee: false, firing: false }, SAMPLE);
   }
-  state.camera.x = state.player.x + 420;
+  state.camera.x = state.player.x + 500;
   state.camera.y = state.player.y;
   return { screen: SCREEN_TITLE, best: 0 };
 }

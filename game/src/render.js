@@ -19,8 +19,8 @@ export const SCREEN_OVER = 'over';
 
 const MINIMAP = { x: VIEW.width - 250, y: 26, w: 236, h: 176 };
 
-// The three boats anchored in the bay (x, y, hull colour).
-const BOATS = [[70, 480, '#f4f6f8'], [100, 1420, '#e8b73d'], [55, 980, '#d94f3d']];
+// The six boats anchored in the bay (x, y, hull colour).
+const BOATS = [[70, 480, '#f4f6f8'], [100, 1420, '#e8b73d'], [55, 980, '#d94f3d'], [120, 300, '#4fc3f7'], [45, 1700, '#7ed957'], [90, 1900, '#f4f6f8']];
 // The named places dotted on the minimap (place, colour).
 const PLACE_DOTS = [
   [PLACES.marina, '#4fc3f7'], [PLACES.plaza, '#f2c94c'], [PLACES.docks, '#ffffff'],
@@ -460,28 +460,28 @@ export function createRenderer(canvas) {
           if (r < 0.16) {
             // AC unit: grey box with a darker grille.
             context.fillStyle = '#8d9299';
-            context.fillRect(wx, wy, 16, 12);
+            context.fillRect(wx, wy, 20, 14);
             context.fillStyle = '#5b6067';
-            context.fillRect(wx + 3, wy + 3, 10, 6);
+            context.fillRect(wx + 3, wy + 3, 14, 8);
           } else if (r < 0.26) {
             // Skylight: pale blue glass catching the sky.
             context.fillStyle = nf > 0.4 ? '#ffd98a' : '#bcd8e8';
-            context.fillRect(wx, wy, 14, 10);
+            context.fillRect(wx, wy, 18, 12);
             context.strokeStyle = 'rgba(0,0,0,0.3)';
             context.lineWidth = 1;
-            context.strokeRect(wx, wy, 14, 10);
+            context.strokeRect(wx, wy, 18, 12);
           } else if (r < 0.34) {
             // Vent pipe.
             context.fillStyle = '#6e6258';
-            context.fillRect(wx + 4, wy, 5, 12);
+            context.fillRect(wx + 4, wy, 6, 14);
           } else if (nf > 0.35 && r < 0.62) {
             // Lit window: warm glass after dark.
             context.fillStyle = `rgba(255,214,130,${(0.55 + 0.35 * hash(r * 91)).toFixed(2)})`;
-            context.fillRect(wx, wy, 12, 9);
+            context.fillRect(wx, wy, 15, 11);
           } else if (nf <= 0.35 && r < 0.5) {
             // Daytime roof tile shading.
             context.fillStyle = 'rgba(255,255,255,0.10)';
-            context.fillRect(wx, wy, 12, 9);
+            context.fillRect(wx, wy, 15, 11);
           }
         }
       }
@@ -558,38 +558,52 @@ export function createRenderer(canvas) {
 
     // Ground cover on the open lawns: deterministic bushes and wildflower
     // dots, so the big grass blocks are not flat green. Skips roads,
-    // buildings, the park, the plaza, the docks and the beach.
-    for (let gx = Math.floor(vx0 / 120) * 120; gx < vx1; gx += 120) {
-      for (let gy = Math.floor(vy0 / 120) * 120; gy < vy1; gy += 120) {
+    // buildings, the park, the plaza, the docks and the beach. At night
+    // the bushes and flowers are drawn a shade lighter and a touch
+    // larger, and sown denser, so the night wash does not swallow them
+    // whole — the bottom-right lawn in the chase frame reads as ground
+    // cover, not an empty dark slab.
+    const coverT = nf > 0.35 ? 0.22 : 0.13;
+    const coverStep = nf > 0.35 ? 90 : 120;
+    for (let gx = Math.floor(vx0 / coverStep) * coverStep; gx < vx1; gx += coverStep) {
+      for (let gy = Math.floor(vy0 / coverStep) * coverStep; gy < vy1; gy += coverStep) {
         const h1 = hash(gx * 0.53 + gy * 0.29);
-        if (h1 >= 0.09) continue;
+        if (h1 >= coverT) continue;
         const bx = gx + 20 + hash(gx * 1.7 + gy) * 80;
         const by = gy + 20 + hash(gx + gy * 1.3) * 80;
         if (bx < CITY.beachWidth || isRoad(city, bx, by) || buildingHit(city, bx, by, 10)) continue;
         if (bx > city.park.x - 10 && bx < city.park.x + city.park.w + 10 && by > city.park.y - 10 && by < city.park.y + city.park.h + 10) continue;
         if (bx > 1462 && bx < 1778 && by > 742 && by < 1058) continue;
         if (bx > 282 && bx < 666 && ((by > 382 && by < 698) || (by > 1822 && by < 2138))) continue;
-        if (h1 < 0.05) {
+        if (h1 < coverT * 0.55) {
           context.fillStyle = 'rgba(0,0,0,0.18)';
           context.beginPath();
           context.ellipse(bx + 2, by + 3, 10, 7, 0, 0, Math.PI * 2);
           context.fill();
-          context.fillStyle = '#4c7a3a';
+          context.fillStyle = nf > 0.35 ? '#6a9a52' : '#4c7a3a';
           context.beginPath();
           context.arc(bx - 3, by, 7, 0, Math.PI * 2);
           context.fill();
           context.beginPath();
           context.arc(bx + 4, by - 2, 6, 0, Math.PI * 2);
           context.fill();
-          context.fillStyle = '#6aa84f';
+          context.fillStyle = nf > 0.35 ? '#8cc46e' : '#6aa84f';
           context.beginPath();
           context.arc(bx - 1, by - 3, 4, 0, Math.PI * 2);
           context.fill();
+          if (nf > 0.35) {
+            // A pale top leaf catching what light there is.
+            context.fillStyle = '#a5d68f';
+            context.beginPath();
+            context.arc(bx - 2, by - 5, 2.5, 0, Math.PI * 2);
+            context.fill();
+          }
         } else {
-          context.fillStyle = hash(bx + by) < 0.5 ? '#e8e4d8' : '#e07a9b';
+          const dotR = nf > 0.35 ? 2.6 : 1.8;
+          context.fillStyle = hash(bx + by) < 0.5 ? (nf > 0.35 ? '#ffffff' : '#e8e4d8') : (nf > 0.35 ? '#ff9ebb' : '#e07a9b');
           for (let f = 0; f < 3; f += 1) {
             context.beginPath();
-            context.arc(bx + hash(bx * 3 + f) * 16 - 8, by + hash(by * 5 + f) * 12 - 6, 1.8, 0, Math.PI * 2);
+            context.arc(bx + hash(bx * 3 + f) * 16 - 8, by + hash(by * 5 + f) * 12 - 6, dotR, 0, Math.PI * 2);
             context.fill();
           }
         }
@@ -829,6 +843,9 @@ export function createRenderer(canvas) {
       let lx = clamp(sx, 90, VIEW.width - 90);
       let ly = clamp(sy, 26, VIEW.height - 26);
       if (state.player.car && lx < 210 && ly > VIEW.height - 118) ly = VIEW.height - 118;
+      // The minimap and its WANTED stars own the top-right corner: a
+      // label landing there would sit on top of the stars.
+      if (lx > 1000 && ly < 252) ly = 252;
       return { x: vx0 + lx, y: vy0 + ly };
     };
     const inView = t.x > vx0 && t.x < vx0 + VIEW.width && t.y > vy0 && t.y < vy0 + VIEW.height;
@@ -1085,6 +1102,19 @@ export function createRenderer(canvas) {
     context.fillStyle = 'rgba(255,255,255,0.18)';
     context.beginPath();
     context.arc(x - 2, y - 3, radius * 0.55, 0, Math.PI * 2);
+    context.fill();
+    // Belt across the waist and darker shoulder pads, so a figure still
+    // reads as a dressed person at screenshot scale instead of a plain dot.
+    context.strokeStyle = 'rgba(0,0,0,0.35)';
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(x - perpX * (radius - 2), y - perpY * (radius - 2));
+    context.lineTo(x + perpX * (radius - 2), y + perpY * (radius - 2));
+    context.stroke();
+    context.fillStyle = 'rgba(0,0,0,0.22)';
+    context.beginPath();
+    context.arc(x - perpX * (radius - 3), y - perpY * (radius - 3), 3, 0, Math.PI * 2);
+    context.arc(x + perpX * (radius - 3), y + perpY * (radius - 3), 3, 0, Math.PI * 2);
     context.fill();
     // Head, pushed a little toward the facing direction, with hair.
     context.fillStyle = skin;
@@ -1373,8 +1403,8 @@ export function createRenderer(canvas) {
     context.restore();
   }
 
-  function drawPanel(title, lines, prompt, accent) {
-    const width = 660;
+  function drawPanel(title, lines, prompt, accent, panelWidth) {
+    const width = panelWidth || 660;
     const height = 168 + lines.length * 32;
     const x = (VIEW.width - width) / 2;
     const y = (VIEW.height - height) / 2;
@@ -1458,7 +1488,7 @@ export function createRenderer(canvas) {
         'WASD / arrows to move and drive  •  E to enter a car  •  Click to shoot',
         `Best haul so far: $${(extra.best || 0).toLocaleString('en-US')}`,
       ];
-      drawPanel('SOLMAR HEAT', lines, extra.saveExists ? 'Press Space to start — or C to continue your save' : 'Press Space or click to start', PALETTE.gold);
+      drawPanel('SOLMAR HEAT', lines, extra.saveExists ? 'Press Space to start — or C to continue your save' : 'Press Space or click to start', PALETTE.gold, 600);
       // Seven gold pips for the seven jobs, under the panel.
       for (let i = 0; i < 7; i += 1) {
         context.fillStyle = PALETTE.gold;

@@ -97,11 +97,35 @@ function spawnTraffic(state, count) {
   for (let i = 0; i < count; i += 1) {
     const p = randomRoadPoint(state.city, state.rng);
     const angle = p.axis === 'x' ? (state.rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2) : (state.rng.chance(0.5) ? 0 : Math.PI);
-    const car = makeCar(p.x, p.y, angle, state.rng.pick(CAR_COLORS), state.rng.pick(['sedan', 'sedan', 'taxi', 'van', 'sports']), 'traffic', p.axis);
+    // Right-hand lanes: each car sits half a car width to the right of
+    // its direction of travel, so oncoming cars pass in the other lane
+    // instead of head-on down the centre line.
+    const off = laneOffset(angle);
+    const x = p.axis === 'x' ? nearestLineValue(state.city.vertical, p.x) + off.x : p.x;
+    const y = p.axis === 'y' ? nearestLineValue(state.city.horizontal, p.y) + off.y : p.y;
+    const car = makeCar(x, y, angle, state.rng.pick(CAR_COLORS), state.rng.pick(['sedan', 'sedan', 'taxi', 'van', 'sports']), 'traffic', p.axis);
     car.dir = state.rng.chance(0.5) ? 1 : -1;
     car.speed = CAR.trafficSpeed * state.rng.range(0.8, 1.1);
     state.cars.push(car);
   }
+}
+
+/** Half a car width to the right of a cardinal heading (right-hand lanes). */
+function laneOffset(angle) {
+  const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  if (a < Math.PI / 4 || a >= Math.PI * 7 / 4) return { x: 0, y: 14 }; // east: right is south
+  if (a < Math.PI * 3 / 4) return { x: -14, y: 0 }; // south: right is west
+  if (a < Math.PI * 5 / 4) return { x: 0, y: -14 }; // west: right is north
+  return { x: 14, y: 0 }; // north: right is east
+}
+
+/** The road centre line nearest a value. */
+function nearestLineValue(lines, value) {
+  let best = lines[0];
+  for (const line of lines) {
+    if (Math.abs(line - value) < Math.abs(best - value)) best = line;
+  }
+  return best;
 }
 
 function spawnParked(state, count) {
@@ -490,7 +514,9 @@ function stepTraffic(state, dt) {
     // Ease off for the car ahead on the same road. The look-ahead is
     // long enough to stop with a real bumper gap: a car is 54 long, so
     // a follower that only brakes inside 80px ends up nose-to-tail at
-    // 34px centres — visibly overlapping the car ahead.
+    // 34px centres — visibly overlapping the car ahead. The side window
+    // is 18px: same-lane cars sit ~0px apart laterally, oncoming cars
+    // in the other lane sit 28px away and must not make this car brake.
     let ahead = null;
     let aheadDist = 0;
     for (const other of state.cars) {
@@ -499,7 +525,7 @@ function stepTraffic(state, dt) {
       const dy = other.y - car.y;
       const forward = Math.cos(car.angle) * dx + Math.sin(car.angle) * dy;
       const side = Math.abs(-Math.sin(car.angle) * dx + Math.cos(car.angle) * dy);
-      if (forward > 0 && forward < 120 && side < 30 && (!ahead || forward < aheadDist)) {
+      if (forward > 0 && forward < 120 && side < 18 && (!ahead || forward < aheadDist)) {
         ahead = other;
         aheadDist = forward;
       }
@@ -519,6 +545,12 @@ function stepTraffic(state, dt) {
       car.angle += turnLeft ? -Math.PI / 2 : Math.PI / 2;
       car.axis = car.axis === 'x' ? 'y' : 'x';
       car.turnCooldown = 2;
+      // A turn changes roads: snap onto the new road's right-hand lane
+      // for the new heading, or the car would keep driving down the
+      // wrong side after every corner.
+      const off = laneOffset(car.angle);
+      if (car.axis === 'x') car.x = nearestLineValue(state.city.vertical, car.x) + off.x;
+      else car.y = nearestLineValue(state.city.horizontal, car.y) + off.y;
     }
     // Wrap around the far edge so traffic never runs out.
     if (car.x < CITY.beachWidth + 40) car.x = WORLD.width - 80;
@@ -526,12 +558,15 @@ function stepTraffic(state, dt) {
     if (car.y < 40) car.y = WORLD.height - 80;
     if (car.y > WORLD.height - 40) car.y = 80;
   }
-  // Traffic cars nudge each other apart instead of stacking up.
+  // Traffic cars nudge each other apart instead of stacking up — but
+  // never oncoming cars in the other lane: they pass 28px apart by
+  // design, and shoving them would push both out of their lanes.
   const movers = state.cars.filter((c) => (c.driver === 'traffic' || c.driver === 'courier') && !c.wrecked);
   for (let i = 0; i < movers.length; i += 1) {
     for (let j = i + 1; j < movers.length; j += 1) {
       const a = movers[i];
       const b = movers[j];
+      if (Math.cos(a.angle) * Math.cos(b.angle) + Math.sin(a.angle) * Math.sin(b.angle) < -0.5) continue;
       const d = dist(a.x, a.y, b.x, b.y);
       if (d > 0.1 && d < CAR.radius * 2 - 6) {
         const push = (CAR.radius * 2 - 6 - d) / 2;
@@ -662,7 +697,10 @@ function stepPoliceCars(state, dt) {
       car.routeIndex += 1;
       wp = car.route[car.routeIndex];
     }
-    if (d < 220) wp = { x: player.x, y: player.y }; // close in: straight at them
+    // No short-range beeline at the player: the last route waypoint is
+    // the player, so the cruiser still closes in — but it gets there
+    // along the roads, instead of cutting across grass and the park
+    // the moment it gets within 220px.
     const want = Math.atan2(wp.y - car.y, wp.x - car.x);
     const diff = angleDiff(car.angle, want);
     car.angle += clamp(diff, -2.4 * dt, 2.4 * dt);
