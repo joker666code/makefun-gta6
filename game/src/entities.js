@@ -69,6 +69,7 @@ export function createState(random, city) {
     stats: { carsStolen: 0, pedsHit: 0, shotsFired: 0, missionsDone: 0, arrests: 0 },
     message: '',
     messageTimer: 0,
+    shake: 0,
     over: false,
     busted: false,
     won: false,
@@ -264,6 +265,7 @@ function stepPlayerOnFoot(state, ctl, dt) {
     player.ammo -= 1;
     state.stats.shotsFired += 1;
     const a = player.angle + state.rng.range(-0.03, 0.03);
+    burst(state, player.x + Math.cos(a) * 24, player.y + Math.sin(a) * 24, '#ffe66d', 3, 60); // muzzle flash
     state.bullets.push({
       x: player.x + Math.cos(a) * 20, y: player.y + Math.sin(a) * 20,
       vx: Math.cos(a) * COMBAT.bulletSpeed, vy: Math.sin(a) * COMBAT.bulletSpeed,
@@ -329,11 +331,24 @@ function stepDriving(state, ctl, dt) {
   else car.speed -= Math.sign(car.speed) * CAR.drag * Math.abs(car.speed) * dt * 2;
   if (Math.abs(car.speed) < 8 && throttle === 0) car.speed = 0;
   car.speed = clamp(car.speed, -CAR.maxReverse, CAR.maxSpeed);
-  const turn = steer * CAR.turnRate * dt * (car.speed >= 0 ? 1 : -1) * clamp(Math.abs(car.speed) / 120, 0.3, 1);
+  // Handbrake (Shift): sharper steering, speed bleeds off, tyres smoke.
+  const drifting = ctl.run && Math.abs(car.speed) > 120;
+  const turn = steer * CAR.turnRate * dt * (car.speed >= 0 ? 1 : -1) * clamp(Math.abs(car.speed) / 120, 0.3, 1) * (drifting ? CAR.driftTurn : 1);
+  if (drifting) {
+    car.speed -= Math.sign(car.speed) * CAR.driftDrag * dt;
+    if (state.rng.chance(dt * 22)) {
+      const bx = car.x - Math.cos(car.angle) * 22;
+      const by = car.y - Math.sin(car.angle) * 22;
+      state.particles.push({ x: bx, y: by, vx: state.rng.range(-20, 20), vy: state.rng.range(-20, 20), life: 0.5, max: 0.5, color: '#cfcfcf', size: state.rng.range(4, 7) });
+    }
+  } else if (ctl.run && Math.abs(car.speed) > 0) {
+    car.speed -= Math.sign(car.speed) * CAR.driftDrag * 2 * dt; // handbrake at low speed: hard stop
+  }
   car.angle += turn;
   if (!moveCarWithSlide(state, car, dt)) {
     if (Math.abs(car.speed) > 200) {
       events |= EVENT_CRASH;
+      state.shake = Math.min(1, (state.shake || 0) + 0.5);
       burst(state, car.x, car.y, '#c9c9c9', 10, 160);
       car.health -= 12;
     }
@@ -366,6 +381,7 @@ function stepDriving(state, ctl, dt) {
         other.speed *= 0.4;
         car.speed *= 0.55;
         events |= EVENT_CRASH;
+        state.shake = Math.min(1, (state.shake || 0) + 0.3);
         burst(state, other.x, other.y, '#f2c94c', 8, 150);
         if (other.health <= 0 && !other.wrecked) {
           other.wrecked = true;
@@ -490,6 +506,8 @@ function stepPeds(state, dt) {
       }
       continue;
     }
+    // 'wait' is the taxi passenger: they stand at the plaza until picked up.
+    if (ped.mode === 'wait') continue;
     const danger = state.bullets.some((b) => b.from === 'player' && dist(b.x, b.y, ped.x, ped.y) < 90)
       || (player.car && dist(player.x, player.y, ped.x, ped.y) < 130 && Math.abs(player.speed) > 150)
       || (state.wanted >= 3 && dist(player.x, player.y, ped.x, ped.y) < 160);
@@ -576,6 +594,7 @@ function stepPoliceCars(state, dt) {
     // player cannot pin the car in place step after step.
     if (d < CAR.radius + PLAYER.radius + 6 && car.ramTimer <= 0) {
       car.ramTimer = 0.9;
+      state.shake = Math.min(1, (state.shake || 0) + 0.35);
       if (player.car) {
         player.car.health -= 8;
         car.speed *= 0.7;
@@ -720,6 +739,7 @@ export function stepGame(state, ctl, dt) {
     state.day += 1;
   }
   if (state.messageTimer > 0) state.messageTimer -= dt;
+  if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 1.8);
   if (state.over) return events;
 
   if (ctl.enter && !player.car) {

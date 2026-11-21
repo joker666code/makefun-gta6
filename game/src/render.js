@@ -7,7 +7,7 @@
 import { CAR, CITY, FONT, PALETTE, PED, PLAYER, VIEW, WORLD } from './config.js';
 import { clamp } from './random.js';
 import { PLACES } from './world.js';
-import { missionObjective } from './missions.js';
+import { missionObjective, missionProgress } from './missions.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
@@ -103,6 +103,16 @@ export function createRenderer(canvas) {
         context.moveTo(20, y + Math.sin(state.time * 1.4 + y * 0.05) * 6);
         context.quadraticCurveTo(70, y + 8, 120, y + Math.sin(state.time * 1.4 + y * 0.05) * 6);
         context.stroke();
+      }
+      // Boats bobbing in the bay.
+      for (const [bx, by, bc] of [[70, 480, '#f4f6f8'], [100, 1420, '#e8b73d'], [55, 980, '#d94f3d']]) {
+        const bob = Math.sin(state.time * 1.1 + by * 0.01) * 4;
+        context.fillStyle = bc;
+        context.beginPath();
+        context.ellipse(bx, by + bob, 26, 10, 0.2, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = '#5c5148';
+        context.fillRect(bx - 2, by + bob - 22, 3, 22);
       }
       context.fillStyle = PALETTE.sand;
       context.fillRect(Math.max(vx0, CITY.beachWidth - 130), vy0, Math.min(CITY.beachWidth, vx1) - Math.max(vx0, CITY.beachWidth - 130), VIEW.height);
@@ -419,18 +429,26 @@ export function createRenderer(canvas) {
     text(`Ammo ${player.ammo}`, 28, 96, 16, PALETTE.text, 'left');
     text(player.car ? 'DRIVING' : 'ON FOOT', 170, 96, 16, PALETTE.blue, 'left', true);
 
-    // Top-centre: current mission.
+    // Top-centre: current mission, with job number and a progress bar.
     const mission = state.mission;
     if (mission) {
-      const label = `${mission.def.title}  •  $${mission.def.reward}`;
+      const label = `JOB ${mission.index + 1}/7  •  ${mission.def.title}  •  $${mission.def.reward}`;
       const obj = missionObjective(state);
+      const prog = missionProgress(state);
+      const h = prog ? 80 : 62;
       context.fillStyle = 'rgba(10,14,20,0.72)';
       const w = 480;
-      rr(VIEW.width / 2 - w / 2, 12, w, 62, 10);
+      rr(VIEW.width / 2 - w / 2, 12, w, h, 10);
       context.fill();
       text(label, VIEW.width / 2, 38, 18, PALETTE.gold, 'center', true);
       text(obj, VIEW.width / 2, 62, 15, PALETTE.text, 'center');
-      if (mission.timer > 0 && mission.index === 1) {
+      if (prog) {
+        context.fillStyle = '#333';
+        context.fillRect(VIEW.width / 2 - 200, 72, 400, 7);
+        context.fillStyle = PALETTE.gold;
+        context.fillRect(VIEW.width / 2 - 200, 72, 400 * Math.max(0, Math.min(1, prog.frac)), 7);
+      }
+      if (mission.timer > 0 && (mission.index === 1 || mission.index === 5)) {
         text(`${Math.ceil(mission.timer)}s`, VIEW.width / 2 + w / 2 - 34, 38, 16, PALETTE.red, 'center', true);
       }
     }
@@ -456,16 +474,22 @@ export function createRenderer(canvas) {
       context.fill();
     }
 
-    // Bottom-left: speed in its own dark chip, above the hint line.
+    // Bottom-left: speed in its own dark chip, above the hint line,
+    // with the car's health bar underneath the speed.
     if (player.car) {
       const kmh = Math.round(Math.abs(player.car.speed) * 0.36);
       context.fillStyle = 'rgba(10,14,20,0.72)';
-      rr(14, VIEW.height - 66, 118, 52, 10);
+      rr(14, VIEW.height - 78, 118, 64, 10);
       context.fill();
-      text(`${kmh}`, 28, VIEW.height - 28, 34, PALETTE.text, 'left', true);
-      text('km/h', 92, VIEW.height - 28, 15, PALETTE.muted, 'left');
+      text(`${kmh}`, 28, VIEW.height - 40, 34, PALETTE.text, 'left', true);
+      text('km/h', 92, VIEW.height - 40, 15, PALETTE.muted, 'left');
+      const carHealth = Math.max(0, player.car.health) / 100;
+      context.fillStyle = '#333';
+      context.fillRect(28, VIEW.height - 30, 90, 6);
+      context.fillStyle = carHealth > 0.4 ? PALETTE.green : PALETTE.red;
+      context.fillRect(28, VIEW.height - 30, 90 * carHealth, 6);
     }
-    text('WASD move/drive  •  E enter car  •  Click shoot  •  F punch  •  P pause  •  M mute', 14, VIEW.height - 8, 13, 'rgba(255,255,255,0.75)', 'left');
+    text('WASD move/drive  •  E enter car  •  Click shoot  •  F punch  •  Shift handbrake  •  P pause  •  M mute', 14, VIEW.height - 8, 13, 'rgba(255,255,255,0.75)', 'left');
     // Bottom-right: clock and day.
     text(`${clockText(state.clock)}  •  Day ${state.day}`, VIEW.width - 14, VIEW.height - 8, 15, PALETTE.text, 'right', true);
 
@@ -509,6 +533,15 @@ export function createRenderer(canvas) {
     }
     const px = (x) => MINIMAP.x + x * sx;
     const py = (y) => MINIMAP.y + y * sy;
+    // Key places, colour-coded, so the map reads without the mission marker.
+    const placeDots = [
+      [PLACES.marina, '#4fc3f7'], [PLACES.plaza, '#f2c94c'], [PLACES.docks, '#ffffff'],
+      [PLACES.hideout, '#7ed957'], [PLACES.vault, '#e5534b'],
+    ];
+    for (const [place, color] of placeDots) {
+      context.fillStyle = color;
+      context.fillRect(px(place.x) - 2, py(place.y) - 2, 4, 4);
+    }
     for (const car of state.cars) {
       context.fillStyle = car.kind === 'cop' ? '#4d8dff' : '#d8d8d8';
       context.fillRect(px(car.x) - 2, py(car.y) - 2, 4, 4);
@@ -571,12 +604,16 @@ export function createRenderer(canvas) {
     const cam = state.camera;
     const vx0 = clamp(cam.x - VIEW.width / 2, 0, WORLD.width - VIEW.width);
     const vy0 = clamp(cam.y - VIEW.height / 2, 0, WORLD.height - VIEW.height);
-    context.setTransform(view.scale, 0, 0, view.scale, view.x - vx0 * view.scale, view.y - vy0 * view.scale);
+    // Crash shake: a small deterministic wobble that fades with state.shake.
+    const shake = state.shake || 0;
+    const ox = shake > 0 ? Math.sin(state.time * 47) * shake * 7 : 0;
+    const oy = shake > 0 ? Math.cos(state.time * 39) * shake * 7 : 0;
+    context.setTransform(view.scale, 0, 0, view.scale, view.x - (vx0 + ox) * view.scale, view.y - (vy0 + oy) * view.scale);
     drawWorld(state);
     context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
     if (screen === SCREEN_TITLE) {
       const lines = [
-        'Port Solmar. Sun, sea, and five jobs that pay.',
+        'Port Solmar. Sun, sea, and seven jobs that pay.',
         'Steal cars, lose the police, run the story — Mara Voss is waiting.',
         'WASD / arrows to move and drive  •  E to enter a car  •  Click to shoot',
         `Best haul so far: $${(extra.best || 0).toLocaleString('en-US')}`,
@@ -585,6 +622,13 @@ export function createRenderer(canvas) {
       return;
     }
     drawHud(state);
+    // Low-health vignette: a pulsing red frame while the player is hurt.
+    if (screen === SCREEN_PLAY && state.player.health < 35) {
+      const pulse = 0.10 + 0.07 * Math.sin(state.time * 5);
+      context.strokeStyle = `rgba(229,83,75,${pulse.toFixed(3)})`;
+      context.lineWidth = 26;
+      context.strokeRect(13, 13, VIEW.width - 26, VIEW.height - 26);
+    }
     if (screen === SCREEN_PAUSED) {
       drawPanel('Paused', ['The city waits. Your heat does not cool while paused.', 'M mute sound  •  R restart the run'], 'Press P to resume', PALETTE.blue);
     } else if (screen === SCREEN_OVER) {

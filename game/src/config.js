@@ -39,6 +39,9 @@ export const CAR = {
   maxReverse: 160,
   turnRate: 2.6,
   drag: 0.55,
+  /** Handbrake (Shift) drift: sharper steering, speed bleeds off. */
+  driftTurn: 1.7,
+  driftDrag: 140,
   trafficSpeed: 150,
   policeSpeed: 520,
 };
@@ -66,7 +69,7 @@ export const WANTED = {
   decayStep: 9,
 };
 
-/** Five linked jobs, in story order. Rewards are paid in dollars. */
+/** Seven linked jobs, in story order. Rewards are paid in dollars. */
 export const MISSIONS = [
   {
     id: 'first-wheels',
@@ -99,6 +102,22 @@ export const MISSIONS = [
     briefing: 'The Solmar police are on you now. Lose the heat, then reach the hideout in the old town.',
     objective: 'Lose the police, then reach the hideout',
     reward: 800,
+  },
+  {
+    id: 'taxi-fare',
+    title: 'Taxi Fare',
+    giver: 'Dario Kent',
+    briefing: 'A high-roller is waiting at Solmar Plaza and pays for a smooth ride. Pick them up in a car and drop them at the marina — no cops, no crashes.',
+    objective: 'Pick up the passenger at Solmar Plaza, drop them at the Marina',
+    reward: 700,
+  },
+  {
+    id: 'smugglers-run',
+    title: "Smuggler's Run",
+    giver: 'Mara Voss',
+    briefing: 'Three drops, one clock: the docks, then Solmar Plaza, then the marina — in that order, before the timer runs out.',
+    objective: 'Hit all three drop points in order before the timer ends',
+    reward: 900,
   },
   {
     id: 'the-big-score',

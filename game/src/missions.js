@@ -36,6 +36,9 @@ function startMission(state, index) {
     hasCash: false,
     route: null,
     targetCar: null,
+    passenger: null,
+    checkpoints: null,
+    checkpointIndex: 0,
   };
   if (index === 0) {
     setTarget(mission, PLACES.marina);
@@ -58,6 +61,24 @@ function startMission(state, index) {
     mission.target = { x: PLACES.hideout.x, y: PLACES.hideout.y, label: PLACES.hideout.label };
     state.wanted = Math.max(state.wanted, 3);
   } else if (index === 4) {
+    // Taxi Fare: a passenger waits at the plaza; pick them up in a car.
+    const passenger = {
+      x: PLACES.plaza.x, y: PLACES.plaza.y, angle: 0,
+      speed: 0, color: '#ffd166', mode: 'wait',
+      tx: PLACES.plaza.x, ty: PLACES.plaza.y, wait: 0, down: 0,
+    };
+    state.peds.push(passenger);
+    mission.passenger = passenger;
+    mission.phase = 'pickup';
+    setTarget(mission, PLACES.plaza);
+  } else if (index === 5) {
+    // Smuggler's Run: three drops in order against the clock.
+    mission.checkpoints = [PLACES.docks, PLACES.plaza, PLACES.marina];
+    mission.checkpointIndex = 0;
+    mission.timer = 110;
+    mission.phase = 'run';
+    setTarget(mission, mission.checkpoints[0]);
+  } else if (index === 6) {
     setTarget(mission, PLACES.vault);
     mission.phase = 'grab';
   }
@@ -92,8 +113,33 @@ export function missionObjective(state) {
   }
   if (mission.index === 2) return mission.phase === 'tail' ? 'Stay close behind the courier van' : 'The van stopped — get to it';
   if (mission.index === 3) return mission.phase === 'hide' ? 'Lose the police (wanted level to zero)' : 'Reach the hideout in the old town';
-  if (mission.index === 4) return mission.phase === 'grab' ? 'Grab the vault cash at Solmar Trust (on foot)' : 'Escape to the hideout with the cash';
+  if (mission.index === 4) {
+    return mission.phase === 'pickup'
+      ? 'Pick up the passenger at Solmar Plaza (drive up in a car)'
+      : 'Drop the passenger at the Marina — smooth ride, no heat';
+  }
+  if (mission.index === 5) {
+    const next = mission.checkpoints ? mission.checkpoints[mission.checkpointIndex] : null;
+    return next ? `Drop ${mission.checkpointIndex + 1}/3: reach ${next.label} — ${Math.ceil(mission.timer)}s left` : 'Run the drops';
+  }
+  if (mission.index === 6) return mission.phase === 'grab' ? 'Grab the vault cash at Solmar Trust (on foot)' : 'Escape to the hideout with the cash';
   return def.objective;
+}
+
+/** Progress bar for the HUD: { label, frac 0..1 } or null when the job has none. */
+export function missionProgress(state) {
+  const mission = state.mission;
+  if (!mission) return null;
+  if (mission.index === 2 && mission.phase === 'tail') {
+    return { label: 'Tail progress', frac: Math.min(1, mission.tailTime / 8) };
+  }
+  if (mission.index === 4) {
+    return { label: 'Taxi Fare', frac: mission.phase === 'drop' ? 0.5 : 0 };
+  }
+  if (mission.index === 5 && mission.checkpoints) {
+    return { label: `Drops ${mission.checkpointIndex}/3`, frac: mission.checkpointIndex / 3 };
+  }
+  return null;
 }
 
 /**
@@ -164,6 +210,29 @@ export function updateMissions(state, city, dt) {
       return completeMission(state);
     }
   } else if (mission.index === 4) {
+    if (mission.phase === 'pickup') {
+      if (player.car && dTarget < 70) {
+        // The passenger gets in: take them off the street, drive to the marina.
+        state.peds = state.peds.filter((p) => p !== mission.passenger);
+        mission.phase = 'drop';
+        setTarget(mission, PLACES.marina);
+      }
+    } else if (dTarget < REACH) {
+      return completeMission(state);
+    }
+  } else if (mission.index === 5) {
+    mission.timer -= dt;
+    if (dTarget < REACH) {
+      mission.checkpointIndex += 1;
+      if (mission.checkpointIndex >= mission.checkpoints.length) return completeMission(state);
+      setTarget(mission, mission.checkpoints[mission.checkpointIndex]);
+    } else if (mission.timer <= 0) {
+      // Clock ran out: the run restarts from the first drop.
+      mission.checkpointIndex = 0;
+      mission.timer = 110;
+      setTarget(mission, mission.checkpoints[0]);
+    }
+  } else if (mission.index === 6) {
     if (mission.phase === 'grab') {
       if (!player.car && dTarget < 60) {
         mission.hasCash = true;
